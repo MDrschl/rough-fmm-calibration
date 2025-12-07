@@ -206,6 +206,11 @@ class RoughBergomiForwardSwapPricerHybrid:
     def _simulate_paths(self):
         """
         Simulate S*_t and V_t on {0, dt, ..., T}.
+
+        Euler–Maruyama on S* for
+
+            dS*_t = S*_t sqrt(V_t) dW*_t
+            => S_{t+dt}^* ≈ S_t^* + S_t^* sqrt(V_t) ΔW*_t
         """
         n = self.n_steps
         dt = self.dt
@@ -214,33 +219,37 @@ class RoughBergomiForwardSwapPricerHybrid:
         # 1) Volterra driver and W^{0*}
         X, dW0 = self.bss.sample(self.n_paths, rng=self.rng)  # X at t=dt,...,T
 
-        # 2) Variance process V_t
+        # 2) Variance process V_t (same as before)
         V = np.empty((self.n_paths, n + 1), dtype=float)
         V[:, 0] = self.v0
         for i in range(1, n + 1):
             t = times[i]
             varX = (self.kappa ** 2) * (t ** (2.0 * self.H)) / (2.0 * self.H)
-            V[:, i] = self._forward_variance_curve(t) * np.exp(X[:, i - 1] - 0.5 * varX)
+            V[:, i] = self._forward_variance_curve(t) * np.exp(
+                X[:, i - 1] - 0.5 * varX
+            )
 
-        # 3) Correlated Brownian motion for S*_t
+        # 3) Correlated Brownian motion for S*_t:
+        #    dW*_t = ρ dW^{0*}_t + sqrt(1-ρ^2) dZ_t
         dWperp = self.rng.normal(size=(self.n_paths, n)) * np.sqrt(dt)
         dWstar = self.rho * dW0 + np.sqrt(1.0 - self.rho ** 2) * dWperp
 
-        # 4) Forward swap rate S*_t (log-Euler)
+        # 4) Forward swap rate S*_t (Euler–Maruyama in S)
         S = np.empty((self.n_paths, n + 1), dtype=float)
         S[:, 0] = self.S0
         for i in range(n):
             vi = np.maximum(V[:, i], 0.0)
-            S[:, i + 1] = S[:, i] * np.exp(-0.5 * vi * dt + np.sqrt(vi) * dWstar[:, i])
+            S[:, i + 1] = S[:, i] + S[:, i] * np.sqrt(vi) * dWstar[:, i]
 
         return times, S, V
+
 
     def price_swaption(self, K, option_type="payer"):
         """
         Swaption price under Q* (numeraire = swap annuity).
 
-        payer   : E[(S*_T - K)^+]
-        receiver: E[(K - S*_T)^+]
+        payer   : E*[(S*_T - K)^+]
+        receiver: E*[(K - S*_T)^+]
         """
         _, S, _ = self._simulate_paths()
         ST = S[:, -1]
@@ -265,17 +274,20 @@ class RoughBergomiForwardSwapPricerHybrid:
 
 
 pricer = RoughBergomiForwardSwapPricerHybrid(
-    H=0.2,
+    H=0.001,
     kappa=1.5,
     rho=-0.7,
     v0=0.04,
     S0=0.02,
     T=5.0,
-    n_steps=500,
-    n_paths=100000,
+    n_steps=50,
+    n_paths=10000,
     gamma=0.5,
     seed=123,
 )
 
 K = 0.02
-payer_price = pricer.price_swaption(K, option_type="payer")
+k = np.log(K / pricer.S0)
+p_atm = pricer.price_put_logstrike(k)
+print(p_atm)
+
