@@ -1,3 +1,5 @@
+# roughBergomiFMM.py
+
 import numpy as np
 import mpmath as mp
 
@@ -158,10 +160,13 @@ class RoughBergomiForwardSwapPricerHybrid:
 
         dS*_t / S*_t = sqrt(V_t) dW*_t,
 
-    V_t = v(t) * exp( X_t - 0.5 Var[X_t] ),    X_t = ∫ ζ(t-s) dW^{0*}_s,
-    ζ(u) = κ u^{H-1/2},   H in (0, 1/2).
+    with
 
-    W* and W^{0*} are Brownian motions with correlation ρ.
+        V_t = v(t) * exp( X_t - 0.5 Var[X_t] ),    X_t = ∫ ζ(t-s) dW^{0*}_s,
+        ζ(u) = κ u^{H-1/2},   H in (0, 0.5].
+
+    For H = 0.5, ζ(u) = κ and the model coincides with the lognormal SABR model
+    with vol-of-vol ν = κ/2. In that case we simulate SABR directly.
     """
 
     def __init__(self, H, kappa, rho, v0,
@@ -171,9 +176,17 @@ class RoughBergomiForwardSwapPricerHybrid:
                  n_paths=10000,
                  gamma=0.5,
                  seed=None):
+        """
+        v_cap (optional): if not None, cap instantaneous variance at this value
+        when updating S* to avoid numerical explosions.
+        """
         self.H = float(H)
-        if not (0.0 < self.H < 0.5):
-            raise ValueError("H must be in (0, 0.5).")
+        if not (0.0 < self.H <= 0.5):
+            raise ValueError("H must be in (0, 0.5].")
+
+        # flag for the SABR limit case H = 1/2
+        self.is_sabr = (abs(self.H - 0.5) < 1e-12)
+
         self.kappa = float(kappa)
         self.rho = float(rho)
         self.v0 = float(v0)
@@ -185,14 +198,19 @@ class RoughBergomiForwardSwapPricerHybrid:
         self.dt = self.T / self.n_steps
         self.rng = np.random.default_rng(seed)
 
-        # BSS driver with a = H - 1/2, L(x) = kappa (constant)
-        a = self.H - 0.5
-        Lfct = lambda x, kappa=self.kappa: kappa * np.ones_like(x)
-        self.bss = HybridBSS(a, Lfct, self.n_steps, self.T, gamma=self.gamma)
+        # For H < 1/2 we need the Volterra driver; for H = 1/2 we don't.
+        if not self.is_sabr:
+            a = self.H - 0.5
+            Lfct = lambda x, kappa=self.kappa: kappa * np.ones_like(x)
+            self.bss = HybridBSS(a, Lfct, self.n_steps, self.T, gamma=self.gamma)
+        else:
+            self.bss = None  # not used in SABR limit
 
     def _forward_variance_curve(self, t):
         """
-        v(t) = v0 * exp( κ^2 t^{2H} / (8H) )   (Sect. 6.1; ensures E[√V_t] is flat).
+        v(t) = v0 * exp( κ^2 t^{2H} / (8H) )
+        (Sect. 6.1; ensures E[√V_t] is flat). For H = 0.5 this is
+        v(t) = v0 * exp( κ^2 t / 4 ), consistent with the SABR limit.
         """
         t = np.asarray(t, dtype=float)
         out = np.empty_like(t)
@@ -207,19 +225,50 @@ class RoughBergomiForwardSwapPricerHybrid:
         """
         Simulate S*_t and V_t on {0, dt, ..., T}.
 
-        Euler–Maruyama on S* for
-
-            dS*_t = S*_t sqrt(V_t) dW*_t
-            => S_{t+dt}^* ≈ S_t^* + S_t^* sqrt(V_t) ΔW*_t
+        - If H < 0.5: use HybridBSS for X_t and construct V_t as in rough Bergomi.
+        - If H = 0.5: simulate lognormal SABR directly with ν = κ / 2.
         """
         n = self.n_steps
         dt = self.dt
         times = np.linspace(0.0, self.T, n + 1)
 
+        # ----- SABR limit: H = 1/2 -----
+        if self.is_sabr:
+            # 1) Brownian for W^{0*}
+            dW0 = self.rng.normal(size=(self.n_paths, n)) * np.sqrt(dt)
+
+            # 2) Volatility process alpha_t = sqrt(V_t)
+            nu = 0.5 * self.kappa  # SABR vol-of-vol
+            alpha = np.empty((self.n_paths, n + 1), dtype=float)
+            alpha[:, 0] = np.sqrt(self.v0)
+
+            for i in range(n):
+                # exact log-Euler for dα_t = ν α_t dW^{0*}_t
+                alpha[:, i + 1] = alpha[:, i] * np.exp(
+                    -0.5 * nu**2 * dt + nu * dW0[:, i]
+                )
+
+            V = alpha**2
+
+            # 3) Correlated Brownian motion for S*_t:
+            #    dW*_t = ρ dW^{0*}_t + sqrt(1-ρ^2) dZ_t
+            dWperp = self.rng.normal(size=(self.n_paths, n)) * np.sqrt(dt)
+            dWstar = self.rho * dW0 + np.sqrt(1.0 - self.rho ** 2) * dWperp
+
+            # 4) Forward swap rate S*_t (Euler in S)
+            S = np.empty((self.n_paths, n + 1), dtype=float)
+            S[:, 0] = self.S0
+            for i in range(n):
+                vol_i = alpha[:, i]
+                S[:, i + 1] = S[:, i] + S[:, i] * vol_i * dWstar[:, i]
+
+            return times, S, V
+
+        # ----- Rough case: 0 < H < 1/2 -----
         # 1) Volterra driver and W^{0*}
         X, dW0 = self.bss.sample(self.n_paths, rng=self.rng)  # X at t=dt,...,T
 
-        # 2) Variance process V_t (same as before)
+        # 2) Variance process V_t
         V = np.empty((self.n_paths, n + 1), dtype=float)
         V[:, 0] = self.v0
         for i in range(1, n + 1):
@@ -230,7 +279,6 @@ class RoughBergomiForwardSwapPricerHybrid:
             )
 
         # 3) Correlated Brownian motion for S*_t:
-        #    dW*_t = ρ dW^{0*}_t + sqrt(1-ρ^2) dZ_t
         dWperp = self.rng.normal(size=(self.n_paths, n)) * np.sqrt(dt)
         dWstar = self.rho * dW0 + np.sqrt(1.0 - self.rho ** 2) * dWperp
 
@@ -243,14 +291,7 @@ class RoughBergomiForwardSwapPricerHybrid:
 
         return times, S, V
 
-
     def price_swaption(self, K, option_type="payer"):
-        """
-        Swaption price under Q* (numeraire = swap annuity).
-
-        payer   : E*[(S*_T - K)^+]
-        receiver: E*[(K - S*_T)^+]
-        """
         _, S, _ = self._simulate_paths()
         ST = S[:, -1]
         if option_type.lower() == "payer":
@@ -262,26 +303,22 @@ class RoughBergomiForwardSwapPricerHybrid:
         return float(payoff.mean())
 
     def price_put_logstrike(self, k):
-        """
-        Normalised put on S*_T / S*_0 as in Sect. 4.2:
-
-            p(k,T) = E[ (exp(k) - S*_T / S*_0)^+ ].
-        """
         _, S, _ = self._simulate_paths()
         ST_over_S0 = S[:, -1] / self.S0
         payoff = np.maximum(np.exp(k) - ST_over_S0, 0.0)
         return float(payoff.mean())
 
 
+
 pricer = RoughBergomiForwardSwapPricerHybrid(
-    H=0.001,
+    H=0.3,
     kappa=1.5,
     rho=-0.7,
     v0=0.04,
     S0=0.02,
     T=5.0,
-    n_steps=50,
-    n_paths=10000,
+    n_steps=500,
+    n_paths=1000,
     gamma=0.5,
     seed=123,
 )
@@ -290,4 +327,3 @@ K = 0.02
 k = np.log(K / pricer.S0)
 p_atm = pricer.price_put_logstrike(k)
 print(p_atm)
-
