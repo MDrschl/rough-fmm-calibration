@@ -619,13 +619,13 @@ def main():
     }
 
     # Save
-    output_path = "/home/claude/usd_swaption_data.pkl"
+    output_path = "usd_swaption_data.pkl"
     with open(output_path, "wb") as f:
         pickle.dump(packaged_data, f)
     print(f"  Saved to {output_path}")
 
     # --- Also save a human-readable summary ---
-    summary_path = "/home/claude/data_summary.txt"
+    summary_path = "data_summary.txt"
     with open(summary_path, "w") as f:
         f.write(f"USD SOFR Swaption Data Summary\n")
         f.write(f"Valuation date: {VALUATION_DATE}\n")
