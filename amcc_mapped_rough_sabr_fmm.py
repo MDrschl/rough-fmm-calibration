@@ -5,7 +5,7 @@ Automatic Monte Carlo Calibration for the Mapped Rough SABR Forward Market Model
 
 Layers 0-1: Parameter space, constraints, and market data loading.
 
-Copyright: Maximilian Droschl, 2026, Master Thesis: 
+Copyright: Maximilian Droschl, 2026, Master Thesis: Fast Swaption Calibration via Automatic Differentiation in a Mapped Rough SABR FMM 
 """
 
 import numpy as np

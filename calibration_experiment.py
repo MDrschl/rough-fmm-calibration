@@ -21,7 +21,7 @@ Follows the two-step calibration procedure of Adachi et al. (2025) §6.2:
         using i-Y co-terminal ATM swaptions.
 
 Usage:
-    python calibration_adachi.py
+    python calibration_experiment.py
 
 Requires:
     - amcc_mapped_rough_sabr_fmm.py (in same directory or on PYTHONPATH)
