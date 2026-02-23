@@ -5,7 +5,7 @@ Automatic Monte Carlo Calibration for the Mapped Rough SABR Forward Market Model
 
 Layers 0-1: Parameter space, constraints, and market data loading.
 
-Copyright: Maximilian Droschl, 2026, Master Thesis: Fast Swaption Calibration via Automatic Differentiation in a Mapped Rough SABR FMM 
+Copyright: Maximilian Droschl, 2026, Master Thesis: 
 """
 
 import numpy as np
@@ -889,44 +889,46 @@ def simulate_exact(
     # Initialize
     log_S = torch.log(S0) * torch.ones(N_paths, dtype=torch.float64, device=device)
 
-    # The correction term: -κ²/(4H) · t^{2H}
-    # More precisely: -κ² · t^{2H} / (2 · 2H) = -κ²/(4H) · t^{2H}
-    # But the notebook uses: -η²/2 · t^{2H} where η = κ/√(2H)
-    # So -η²/2 · t^{2H} = -κ²/(2·2H) · t^{2H} = -κ²/(4H) · t^{2H}  ✓
+    # Correction term: κ²/(4H) · t^{2H}
+    # Notebook uses η with: -η²/2 · t^{2H}.  With κ = η√(2H):
+    # -κ²/(4H) · t^{2H} = -η²/2 · t^{2H}  ✓
     two_H = 2.0 * H
     kappa_sq = kappa ** 2
+
+    # Initialize variance at LEFT endpoint (t = 0): V(0) = v(0)
+    # This matches the notebook: vol_states = torch.ones(...) * self.v0
+    V_current = v0 * torch.ones(N_paths, dtype=torch.float64, device=device)
 
     prev_W = torch.zeros(N_paths, dtype=torch.float64, device=device)
 
     for i in range(M):
-        t_i = (i + 1) * h
+        t_next = (i + 1) * h
 
-        # W̃^H_{t_i} from the Cholesky product (even indices)
-        fBm_i = prod_mat[:, 2 * i]
+        # W̃^H_{t_{i+1}} from the Cholesky product (even indices)
+        fBm_next = prod_mat[:, 2 * i]
 
-        # W⁰_{t_i} from the Cholesky product (odd indices)
-        W0_i = prod_mat[:, 2 * i + 1]
+        # W⁰_{t_{i+1}} from the Cholesky product (odd indices)
+        W0_next = prod_mat[:, 2 * i + 1]
 
-        # ΔW⁰_i = W⁰_{t_i} - W⁰_{t_{i-1}}
-        dW0_i = W0_i - prev_W
-        prev_W = W0_i
+        # ΔW⁰ over [t_i, t_{i+1}]
+        dW0_i = W0_next - prev_W
+        prev_W = W0_next
 
-        # Variance process: V_{t_i} = v(t_i) · exp(κ · W̃^H_{t_i} - κ²/(4H) · t_i^{2H})
-        correction = kappa_sq / (2.0 * two_H) * t_i ** two_H
-        V_i = v0 * torch.exp(kappa * fBm_i - correction)
-
-        # Forward variance curve adjustment (if time-dependent)
-        if v_curve is not None:
-            V_i = V_i * v_curve[i]
-
-        # Floor variance at 0 for safety
-        V_i = torch.clamp(V_i, min=0.0)
-
-        # Price process increment:
-        # dS/S = √V (ρ dW⁰ + √(1-ρ²) dW⊥)
+        # --- Step 1: Price update using LEFT-endpoint variance V(t_i) ---
+        # (Euler-Maruyama: evaluate drift and diffusion at the left endpoint)
         brownian_incr = rho_eff * dW0_i + sqrt_rho * Z_indep[:, i]
+        log_S = log_S - 0.5 * V_current * h + torch.sqrt(V_current) * brownian_incr
 
-        log_S = log_S - 0.5 * V_i * h + torch.sqrt(V_i) * brownian_incr
+        # --- Step 2: Update variance to RIGHT endpoint V(t_{i+1}) for next step ---
+        correction = kappa_sq / (2.0 * two_H) * t_next ** two_H
+        V_next = v0 * torch.exp(kappa * fBm_next - correction)
+
+        # Forward variance curve adjustment
+        if v_curve is not None:
+            V_next = V_next * v_curve[i]
+
+        V_next = torch.clamp(V_next, min=0.0)
+        V_current = V_next
 
     return torch.exp(log_S)
 
@@ -971,40 +973,33 @@ def simulate_approx(
     two_H = 2.0 * H
     kappa_sq = kappa ** 2
 
-    for i in range(M):
-        t_i = (i + 1) * h
+    # Initialize variance at LEFT endpoint (t = 0): V(0) = v(0)
+    # This matches the notebook: vol_states = torch.ones(...) * self.v0
+    V_current = v0 * torch.ones(N_paths, dtype=torch.float64, device=device)
 
-        # Kernel discretization: W̃^H_{t_i} ≈ Σ_{k=0}^{i} (t_{i+1} - t_{k+1})^{H-1/2} ΔW⁰_k
-        # But we need the Volterra integral at t_{i+1}:
-        # Note: t_{i+1} - t_{k+1} = (i - k) h for k=0,...,i
-        # K_{i-k} = ((i+1-k)*h)^{H-1/2} ... wait, we want the kernel evaluated at
-        # the left endpoints of each subinterval.
-        #
-        # More precisely: W̃^H_{t_i} ≈ Σ_{k=0}^{i-1} ∫_{t_k}^{t_{k+1}} (t_i - s)^{H-1/2} ds ≈
-        # Σ_{k=0}^{i-1} (t_i - t_k)^{H-1/2} ΔW⁰_k
-        #
-        # Following the notebook: vec_tmp = h*(i+1 - arange(0, i+1)), then kernel = vec_tmp^{H-1/2}
+    for i in range(M):
+        t_next = (i + 1) * h
+
+        # --- Step 1: Price update using LEFT-endpoint variance V(t_i) ---
+        brownian_incr = rho_eff * dW0[:, i] + sqrt_rho * dW_perp[:, i]
+        log_S = log_S - 0.5 * V_current * h + torch.sqrt(V_current) * brownian_incr
+
+        # --- Step 2: Update variance to RIGHT endpoint V(t_{i+1}) for next step ---
+        # Kernel discretization of fBm at t_{i+1}:
+        # W̃^H_{t_{i+1}} ≈ Σ_{k=0}^{i} ((i+1-k)h)^{H-1/2} ΔW⁰_k
+        # Following the notebook: vec_tmp = h*(i+1 - arange(0, i+1))
         lags = h * (i + 1 - torch.arange(0, i + 1, dtype=torch.float64, device=device))
         kernels = lags ** (H - 0.5)  # shape (i+1,)
+        fBm_next = dW0[:, 0:i+1] @ kernels  # shape (N_paths,)
 
-        # fBm ≈ Σ_{k=0}^{i} kernel(t_{i+1}-t_{k+1}) · ΔW⁰_k
-        # But dW0 is scaled by √h, so dW0[:,k] = √h * Z_k.
-        # The Volterra integral is: Σ (t_{i+1}-t_k)^{H-1/2} ΔW⁰_k
-        # where ΔW⁰_k has variance h. So fbm = dW0[:, 0:i+1] @ kernels
-        fBm_i = dW0[:, 0:i+1] @ kernels  # shape (N_paths,)
-
-        # Variance: V_{t_i} = v(0) · exp(κ fbm - κ²/(4H) t^{2H})
-        correction = kappa_sq / (2.0 * two_H) * t_i ** two_H
-        V_i = v0 * torch.exp(kappa * fBm_i - correction)
+        correction = kappa_sq / (2.0 * two_H) * t_next ** two_H
+        V_next = v0 * torch.exp(kappa * fBm_next - correction)
 
         if v_curve is not None:
-            V_i = V_i * v_curve[i]
+            V_next = V_next * v_curve[i]
 
-        V_i = torch.clamp(V_i, min=0.0)
-
-        # Price increment
-        brownian_incr = rho_eff * dW0[:, i] + sqrt_rho * dW_perp[:, i]
-        log_S = log_S - 0.5 * V_i * h + torch.sqrt(V_i) * brownian_incr
+        V_next = torch.clamp(V_next, min=0.0)
+        V_current = V_next
 
     return torch.exp(log_S)
 
