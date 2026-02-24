@@ -1,0 +1,542 @@
+"""
+AMCC Calibration of the Mapped Rough SABR FMM
+==============================================
+
+This is the main calibration experiment for the thesis. It implements
+Automatic Monte Carlo Calibration (AMCC) following Gonon et al. (2025):
+all model parameters are optimised *jointly* by backpropagating through
+the Monte Carlo simulator, treating each Euler time step as a layer in
+a deep network with shared weights.
+
+This contrasts with Adachi et al.'s (2025) sequential procedure:
+    Adachi:  H grid scan → κ,ρ₀ formula-based → α ATM match → Σ row-by-row
+    AMCC:    Stage 1 (approximate scheme, H differentiable, all params joint)
+           → Stage 2 (exact Cholesky, H frozen, refine with more paths)
+
+The two-stage split in AMCC is purely computational: the approximate
+scheme makes H differentiable but has O(M²) cost and discretisation bias;
+the exact scheme fixes H but gives unbiased fBm samples in O(M) per path.
+
+Usage:
+    python amcc_calibration_experiment.py
+
+Requires:
+    - amcc_mapped_rough_sabr_fmm.py (with verbose=False fix for torch ≥2.2)
+    - usd_swaption_data.pkl
+    - PyTorch ≥ 2.0, NumPy, SciPy, matplotlib
+"""
+
+import sys
+import time
+import copy
+import numpy as np
+import torch
+
+from amcc_mapped_rough_sabr_fmm import (
+    MappedRoughSABRParams,
+    load_market_data,
+    match_all_alphas,
+    calibrate_two_stage,
+    print_market_summary,
+    print_calibration_report,
+    print_smile_comparison,
+    generate_smile_plot_data,
+    compute_effective_params,
+    mc_prices_to_black_iv,
+    simulate_swaption,
+    compute_swaption_prices,
+)
+
+
+# =============================================================================
+# Configuration
+# =============================================================================
+
+CONFIG = {
+    # Data
+    "data_file": "usd_swaption_data.pkl",
+    "subset": "joint_all_smiles",
+    "device": "cpu",
+
+    # Stage 1: approximate scheme (H differentiable)
+    #   Gonon uses 500 iters × 25k paths for ~4 params.
+    #   We have ~80 params (H, κ, 11 α, 66 angles), so need more room.
+    "stage1": {
+        "iterations": 800,
+        "lr": 5e-3,
+        "N_paths": 10_000,
+        "M": 50,
+        "keys": None,           # None = all swaptions
+    },
+
+    # Stage 2: exact Cholesky scheme (H frozen)
+    #   Previous run: loss still dropping at iter 400.
+    #   Higher lr to close the gap from scheme switch faster.
+    "stage2": {
+        "iterations": 800,
+        "lr": 3e-3,
+        "N_paths": 30_000,
+        "M": 50,
+        "variance_mode": "full",
+        "keys": None,
+    },
+
+    # Diagnostics
+    "diag_N_paths": 100_000,
+    "diag_M": 100,
+
+    # Reproducibility
+    "crn_seed": 42,
+}
+
+
+# =============================================================================
+# Initialisation
+# =============================================================================
+
+def _softplus_inv(a):
+    """Numerically stable inverse of softplus: x = a + log(1 - exp(-a))."""
+    a = float(a)
+    if a > 20.0:
+        return a  # softplus(x) ≈ x for large x
+    return a + np.log(-np.expm1(-a))  # log(1-exp(-a)) = log(-expm1(-a))
+
+
+def _interpolate_alpha(alpha, matched_indices):
+    """
+    Fill unmatched α values by linear interpolation with flat extrapolation,
+    following the same scheme Adachi §6.2 uses for ρ₀.
+
+    Args:
+        alpha:           shape (N,) tensor — some entries already matched
+        matched_indices: sorted list of 0-based indices that are pinned
+
+    Returns:
+        alpha with all entries filled
+    """
+    alpha = alpha.clone()
+    N = alpha.shape[0]
+    anchors = sorted(matched_indices)
+
+    for j in range(N):
+        if j in anchors:
+            continue
+        if j <= anchors[0]:
+            # Flat extrapolation left
+            alpha[j] = alpha[anchors[0]]
+        elif j >= anchors[-1]:
+            # Flat extrapolation right
+            alpha[j] = alpha[anchors[-1]]
+        else:
+            # Linear interpolation between nearest anchors
+            lo = max(a for a in anchors if a < j)
+            hi = min(a for a in anchors if a > j)
+            frac = (j - lo) / (hi - lo)
+            alpha[j] = (1 - frac) * alpha[lo] + frac * alpha[hi]
+
+    return alpha
+
+
+def initialise_params(mkt, H_init=0.20, kappa_init=1.0):
+    """
+    Create parameter module and warm-start ALL α values.
+
+    Strategy:
+      1. Match α_j analytically for each 1Y-tenor swaption.
+         These are single-rate, so α_j = σ_ATM / (π_j √G) exactly.
+         This pins α at indices corresponding to rates R_{I+1} for each
+         (I, I+1) swaption — typically indices {1, 3, 5, 7, 10}.
+
+      2. Interpolate the remaining α values (rates not covered by any
+         1Y-tenor swaption) via linear interpolation with flat
+         extrapolation from the matched anchors. This follows the same
+         principle as Adachi §6.2 for ρ₀ interpolation.
+
+      3. Refine using multi-rate swaptions: run match_all_alphas over
+         all swaptions (including multi-rate), which uses Brent
+         root-finding to scale the α vector within each swaption's
+         rate window so that the model ATM matches market ATM.
+
+    This ensures all 11 α values start near sensible levels rather
+    than leaving 6 out of 11 at the uninformed default.
+    """
+    params = MappedRoughSABRParams(N=mkt.N, device=mkt.device)
+    params.set_H(H_init)
+    params.set_kappa(kappa_init)
+
+    with torch.no_grad():
+        p = params()
+
+        # --- Pass 1: match 1Y-tenor swaptions (single-rate, analytic) ---
+        smile_keys_1y = sorted([k for k in mkt.swaptions.keys() if k[1] == 1])
+        alpha_matched = match_all_alphas(
+            mkt, p["H"], p["kappa"], p["rho0"], p["rho"],
+            alpha_init=p["alpha"],
+            smile_keys=smile_keys_1y,
+            variance_curve_mode="simplified",
+            method="formula",
+        )
+
+        # Identify which 0-based indices were pinned
+        matched_indices = []
+        for key in smile_keys_1y:
+            swn = mkt.swaptions[key]
+            if swn.J - swn.I == 1:
+                matched_indices.append(swn.I)
+
+        print(f"\n  Pass 1 — 1Y-tenor ATM matching:")
+        print(f"    Matched rate indices (0-based): {matched_indices}")
+        print(f"    α at matched: "
+              + ", ".join(f"α[{i}]={alpha_matched[i].item():.4f}"
+                          for i in matched_indices))
+
+        # --- Pass 2: interpolate unmatched rates ---
+        alpha_final = _interpolate_alpha(alpha_matched, matched_indices)
+
+        unmatched = [j for j in range(mkt.N) if j not in matched_indices]
+        print(f"  Pass 2 — interpolation for unmatched indices: {unmatched}")
+        print(f"    α after interpolation: "
+              + ", ".join(f"α[{j}]={alpha_final[j].item():.4f}"
+                          for j in unmatched))
+        print(f"    α final: [{', '.join(f'{a:.4f}' for a in alpha_final.numpy())}]")
+
+        # NOTE: We do NOT refine with multi-rate swaptions here.
+        # The Brent common-factor scaling for multi-rate swaptions
+        # overwrites the accurate single-rate matches from Pass 1.
+        # Instead, we let the optimizer handle the multi-rate fit
+        # jointly — that's the whole point of AMCC.
+
+        # --- Write all α back to params ---
+        for j in range(mkt.N):
+            a = alpha_final[j].item()
+            params.alpha_tilde.data[j] = _softplus_inv(a)
+
+    # --- Verify ATM fit across representative swaptions ---
+    with torch.no_grad():
+        p = params()
+        print(f"\n  Initialised parameters:")
+        print(f"    H     = {p['H'].item():.4f}")
+        print(f"    κ     = {p['kappa'].item():.4f}")
+        print(f"    α     = [{', '.join(f'{a:.4f}' for a in p['alpha'].numpy())}]")
+        print(f"    ρ₀    = [{', '.join(f'{r:.3f}' for r in p['rho0'].numpy())}]")
+
+        # ATM check on diverse swaptions
+        check_keys = [(1.0, 1), (1.0, 5), (1.0, 10), (3.0, 1), (5.0, 5), (10.0, 1)]
+        print(f"\n  ATM verification:")
+        for key in check_keys:
+            if key not in mkt.swaptions:
+                continue
+            swn = mkt.swaptions[key]
+            eff = compute_effective_params(
+                p["alpha"], p["rho0"], p["rho"], swn,
+            )
+            atm_model = np.sqrt(eff["v0"].item()) * 100
+            atm_mkt = swn.ivs_black[swn.n_strikes // 2].item() * 100
+            exp, ten = key
+            print(f"    {exp:.0f}Y×{ten:.0f}Y: "
+                  f"model √v(0)={atm_model:.2f}%  market ATM={atm_mkt:.2f}%  "
+                  f"diff={atm_model - atm_mkt:+.2f}%")
+
+    return params
+
+
+# =============================================================================
+# MC-based diagnostics
+# =============================================================================
+
+def mc_diagnostics(params, mkt, N_paths=100_000, M=100, seed=42):
+    """
+    Full MC-based calibration report with high path count.
+
+    This is the definitive quality metric — no formula approximation.
+    """
+    print("\n" + "=" * 72)
+    print("MC-BASED CALIBRATION REPORT")
+    print(f"({N_paths:,} paths, {M} time steps)")
+    print("=" * 72)
+
+    report = print_calibration_report(
+        params, mkt,
+        method="mc",
+        variance_curve_mode="full",
+        N_paths=N_paths,
+        M=M,
+        seed=seed,
+    )
+
+    return report
+
+
+# =============================================================================
+# Plotting
+# =============================================================================
+
+def save_plots(params, mkt, step1_history, step2_history, config):
+    """Generate and save diagnostic plots."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("matplotlib not available, skipping plots")
+        return
+
+    # --- 1. Convergence plot ---
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.5))
+
+    # Loss
+    s1_steps = [r["step"] for r in step1_history]
+    s1_loss = [r["loss"] for r in step1_history]
+    s2_steps = [r["step"] + len(step1_history) for r in step2_history]
+    s2_loss = [r["loss"] for r in step2_history]
+
+    ax1.semilogy(s1_steps, s1_loss, "b-", alpha=0.7, label="Stage 1 (approx)")
+    ax1.semilogy(s2_steps, s2_loss, "r-", alpha=0.7, label="Stage 2 (exact)")
+    ax1.axvline(len(step1_history), color="gray", linestyle="--", alpha=0.5)
+    ax1.set_xlabel("Iteration")
+    ax1.set_ylabel("Vega-weighted loss")
+    ax1.set_title("Calibration convergence")
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+
+    # H evolution (Stage 1 only)
+    # Extract H from loss_iv proxy — we need to recompute, or store in history
+    # For now, use learning rate as a proxy for phase
+    s1_lr = [r["lr"] for r in step1_history]
+    s2_lr = [r["lr"] for r in step2_history]
+    ax2.semilogy(s1_steps, s1_lr, "b-", alpha=0.7, label="Stage 1")
+    ax2.semilogy(s2_steps, s2_lr, "r-", alpha=0.7, label="Stage 2")
+    ax2.axvline(len(step1_history), color="gray", linestyle="--", alpha=0.5)
+    ax2.set_xlabel("Iteration")
+    ax2.set_ylabel("Learning rate")
+    ax2.set_title("Learning rate schedule")
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig("amcc_convergence.png", dpi=150)
+    print("Saved: amcc_convergence.png")
+
+    # --- 2. Smile fits ---
+    # Collect all keys grouped by maturity
+    keys_by_maturity = {}
+    for key in sorted(mkt.swaptions.keys()):
+        exp = key[0]
+        keys_by_maturity.setdefault(exp, []).append(key)
+
+    maturities = sorted(keys_by_maturity.keys())
+    n_mat = len(maturities)
+    max_per_row = max(len(v) for v in keys_by_maturity.values())
+
+    fig, axes = plt.subplots(
+        n_mat, max_per_row,
+        figsize=(4.5 * max_per_row, 3.5 * n_mat),
+        squeeze=False,
+    )
+
+    cholesky_cache = {}
+    with torch.no_grad():
+        for row_idx, mat in enumerate(maturities):
+            keys = keys_by_maturity[mat]
+            for col_idx, key in enumerate(keys):
+                ax = axes[row_idx, col_idx]
+                swn = mkt.swaptions[key]
+
+                # MC smile
+                torch.manual_seed(config["crn_seed"])
+                S_T = simulate_swaption(
+                    params, swn, mkt,
+                    N_paths=50_000, M=80,
+                    use_exact=True,
+                    variance_curve_mode="full",
+                    cholesky_cache=cholesky_cache,
+                )
+                mc_prices = compute_swaption_prices(S_T, swn)
+                model_ivs = mc_prices_to_black_iv(mc_prices, swn)
+
+                offsets = ((swn.strikes - swn.S0) * 10000).numpy()
+                mkt_ivs = swn.ivs_black.numpy() * 100
+                mod_ivs = model_ivs.numpy() * 100
+
+                ax.plot(offsets, mkt_ivs, "ko-", markersize=3, label="Market")
+                ax.plot(offsets, mod_ivs, "r^--", markersize=3, label="Model")
+                ax.set_title(f"{key[0]:.0f}Y × {key[1]:.0f}Y", fontsize=10)
+                ax.set_xlabel("Strike offset (bp)", fontsize=8)
+                ax.set_ylabel("IV (%)", fontsize=8)
+                ax.tick_params(labelsize=7)
+                ax.grid(True, alpha=0.3)
+                if row_idx == 0 and col_idx == 0:
+                    ax.legend(fontsize=7)
+
+            # Hide unused axes
+            for col_idx in range(len(keys), max_per_row):
+                axes[row_idx, col_idx].set_visible(False)
+
+    plt.tight_layout()
+    plt.savefig("amcc_smile_fits.png", dpi=150)
+    print("Saved: amcc_smile_fits.png")
+
+    # --- 3. Correlation matrix heatmap ---
+    with torch.no_grad():
+        p = params()
+        Sigma = p["Sigma"].numpy()
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+    im = ax.imshow(Sigma, cmap="RdBu_r", vmin=-1, vmax=1)
+    ax.set_title("Calibrated correlation matrix Σ")
+    labels = ["W⁰"] + [f"W{i}" for i in range(1, mkt.N + 1)]
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(labels, fontsize=7, rotation=45)
+    ax.set_yticks(range(len(labels)))
+    ax.set_yticklabels(labels, fontsize=7)
+    plt.colorbar(im, ax=ax, shrink=0.8)
+    plt.tight_layout()
+    plt.savefig("amcc_correlation.png", dpi=150)
+    print("Saved: amcc_correlation.png")
+
+    plt.close("all")
+
+
+# =============================================================================
+# Main
+# =============================================================================
+
+if __name__ == "__main__":
+
+    t_start = time.time()
+    cfg = CONFIG
+
+    # ---- Load data ----
+    print("Loading market data...")
+    mkt = load_market_data(
+        cfg["data_file"],
+        subset=cfg["subset"],
+        convert_otm_from_bachelier=True,
+        device=cfg["device"],
+    )
+    print_market_summary(mkt)
+
+    # ---- Initialise ----
+    print("\n" + "#" * 60)
+    print("# INITIALISATION")
+    print("#" * 60)
+
+    params = initialise_params(mkt, H_init=0.20, kappa_init=1.0)
+
+    # ---- AMCC two-stage calibration ----
+    print("\n" + "#" * 60)
+    print("# AMCC CALIBRATION")
+    print("#" * 60)
+
+    result = calibrate_two_stage(
+        params, mkt,
+        # Stage 1
+        stage1_iterations=cfg["stage1"]["iterations"],
+        stage1_lr=cfg["stage1"]["lr"],
+        stage1_N_paths=cfg["stage1"]["N_paths"],
+        stage1_M=cfg["stage1"]["M"],
+        stage1_keys=cfg["stage1"]["keys"],
+        # Stage 2
+        stage2_iterations=cfg["stage2"]["iterations"],
+        stage2_lr=cfg["stage2"]["lr"],
+        stage2_N_paths=cfg["stage2"]["N_paths"],
+        stage2_M=cfg["stage2"]["M"],
+        stage2_variance_mode=cfg["stage2"]["variance_mode"],
+        stage2_keys=cfg["stage2"]["keys"],
+        # Common
+        use_crn=True,
+        crn_seed=cfg["crn_seed"],
+        log_every=20,
+    )
+
+    # ---- Calibrated parameters ----
+    print("\n" + "#" * 60)
+    print("# CALIBRATED PARAMETERS")
+    print("#" * 60)
+
+    with torch.no_grad():
+        p = params()
+        print(f"\n  H     = {p['H'].item():.4f}")
+        print(f"  κ     = {p['kappa'].item():.4f}")
+
+        alpha = p["alpha"].numpy()
+        print(f"\n  Volatility levels α_j:")
+        for j in range(mkt.N):
+            print(f"    α_{j+1:2d} = {alpha[j]:.4f}")
+
+        rho0 = p["rho0"].numpy()
+        print(f"\n  Spot-vol correlations ρ₀,j:")
+        for j in range(mkt.N):
+            print(f"    ρ₀,{j+1:2d} = {rho0[j]:+.4f}")
+
+        print(f"\n  Forward-rate correlation matrix ρ_ij:")
+        rho = p["rho"].numpy()
+        np.set_printoptions(precision=3, linewidth=120)
+        print(rho)
+
+    # ---- MC diagnostics ----
+    print("\n" + "#" * 60)
+    print("# MC DIAGNOSTICS")
+    print("#" * 60)
+
+    report = mc_diagnostics(
+        params, mkt,
+        N_paths=cfg["diag_N_paths"],
+        M=cfg["diag_M"],
+    )
+
+    # ---- Per-swaption smile comparisons ----
+    print("\n" + "#" * 60)
+    print("# SMILE COMPARISONS (selected swaptions)")
+    print("#" * 60)
+
+    representative_keys = [
+        (1.0, 1), (1.0, 5), (1.0, 10),
+        (3.0, 1), (3.0, 5),
+        (5.0, 1), (5.0, 5),
+        (7.0, 1), (7.0, 3),
+        (10.0, 1),
+    ]
+    for key in representative_keys:
+        if key in mkt.swaptions:
+            print_smile_comparison(
+                params, mkt.swaptions[key], mkt,
+                method="mc",
+                variance_curve_mode="full",
+                N_paths=cfg["diag_N_paths"],
+                M=cfg["diag_M"],
+            )
+
+    # ---- Plots ----
+    print("\n" + "#" * 60)
+    print("# GENERATING PLOTS")
+    print("#" * 60)
+
+    save_plots(
+        params, mkt,
+        result["stage1"]["history"],
+        result["stage2"]["history"],
+        cfg,
+    )
+
+    # ---- Save results ----
+    elapsed = time.time() - t_start
+
+    results = {
+        "config": cfg,
+        "params_state_dict": params.state_dict(),
+        "H": p["H"].item(),
+        "kappa": p["kappa"].item(),
+        "alpha": p["alpha"].numpy(),
+        "rho0": p["rho0"].numpy(),
+        "rho": p["rho"].numpy(),
+        "Sigma": p["Sigma"].numpy(),
+        "stage1_history": result["stage1"]["history"],
+        "stage2_history": result["stage2"]["history"],
+        "H_calibrated": result["H_calibrated"],
+        "elapsed_seconds": elapsed,
+    }
+    torch.save(results, "amcc_calibration_results.pt")
+    print(f"\nResults saved to amcc_calibration_results.pt")
+    print(f"Total elapsed time: {elapsed:.1f}s ({elapsed/60:.1f} min)")
+    print("\nDone.")

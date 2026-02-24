@@ -1828,7 +1828,7 @@ def calibrate(
     optimizer = torch.optim.Adam(params.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='min', patience=scheduler_patience,
-        factor=scheduler_factor, min_lr=min_lr, verbose=False,
+        factor=scheduler_factor, min_lr=min_lr,
     )
 
     cholesky_cache = {} if use_exact else None
