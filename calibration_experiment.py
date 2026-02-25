@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Incremental Calibration of Mapped Rough SABR FMM
 =================================================

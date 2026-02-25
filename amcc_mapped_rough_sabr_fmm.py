@@ -5,7 +5,7 @@ Automatic Monte Carlo Calibration for the Mapped Rough SABR Forward Market Model
 
 Layers 0-1: Parameter space, constraints, and market data loading.
 
-Copyright: Maximilian Droschl, 2026, Master Thesis: 
+Copyright: Maximilian Droschl, 2026, Master Thesis
 """
 
 import numpy as np
@@ -74,7 +74,7 @@ def bachelier_to_black_iv(S0, K, T, sigma_n, annuity, is_call=True):
 
 
 # =============================================================================
-# Layer 1: Market data container
+# Layer 0: Market data container
 # =============================================================================
 
 @dataclass
@@ -248,7 +248,7 @@ def load_market_data(
 
 
 # =============================================================================
-# Layer 0: Parameter module with smooth constraints
+# Layer 1: Parameter module with smooth constraints
 # =============================================================================
 
 class MappedRoughSABRParams(nn.Module):
@@ -1793,14 +1793,15 @@ def calibrate(
     crn_seed: int = 42,
     log_every: int = 20,
     swaption_keys: Optional[list] = None,
-    scheduler_patience: int = 50,
+    scheduler_type: str = "cosine",
+    scheduler_patience: int = 150,
     scheduler_factor: float = 0.5,
     min_lr: float = 1e-6,
 ) -> dict:
     """
     Layer 7: Run the calibration loop.
 
-    Uses Adam optimizer with optional learning rate scheduling.
+    Uses Adam optimizer with learning rate scheduling.
     Supports common random numbers (CRN) for variance reduction.
 
     Args:
@@ -1816,9 +1817,13 @@ def calibrate(
         crn_seed:            base seed for CRN
         log_every:           print progress every N steps
         swaption_keys:       subset of swaptions to calibrate on
-        scheduler_patience:  reduce LR after this many steps without improvement
-        scheduler_factor:    LR reduction factor
-        min_lr:              minimum learning rate
+        scheduler_type:      "cosine" (CosineAnnealingLR, recommended) or
+                             "plateau" (ReduceLROnPlateau, noisy with MC).
+                             Cosine is preferred: deterministic decay, no
+                             dependence on noisy loss signals.
+        scheduler_patience:  [plateau only] steps without improvement before LR cut
+        scheduler_factor:    [plateau only] LR reduction factor
+        min_lr:              minimum learning rate (both schedulers)
 
     Returns:
         dict with:
@@ -1826,10 +1831,18 @@ def calibrate(
             best:      dict of best parameters (lowest loss)
     """
     optimizer = torch.optim.Adam(params.parameters(), lr=lr)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', patience=scheduler_patience,
-        factor=scheduler_factor, min_lr=min_lr,
-    )
+
+    if scheduler_type == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=n_iterations, eta_min=min_lr,
+        )
+    elif scheduler_type == "plateau":
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', patience=scheduler_patience,
+            factor=scheduler_factor, min_lr=min_lr,
+        )
+    else:
+        raise ValueError(f"Unknown scheduler_type: {scheduler_type}")
 
     cholesky_cache = {} if use_exact else None
     history = []
@@ -1858,7 +1871,12 @@ def calibrate(
         torch.nn.utils.clip_grad_norm_(params.parameters(), max_norm=10.0)
 
         optimizer.step()
-        scheduler.step(loss.item())
+
+        # Step the scheduler
+        if scheduler_type == "cosine":
+            scheduler.step()
+        else:
+            scheduler.step(loss.item())
 
         current_lr = optimizer.param_groups[0]['lr']
 
@@ -1908,6 +1926,8 @@ def calibrate_two_stage(
     stage1_N_paths: int = 5000,
     stage1_M: int = 30,
     stage1_keys: Optional[list] = None,
+    stage1_scheduler: str = "cosine",
+    stage1_min_lr: float = 1e-5,
     # Stage 2 settings
     stage2_iterations: int = 200,
     stage2_lr: float = 1e-3,
@@ -1915,34 +1935,53 @@ def calibrate_two_stage(
     stage2_M: int = 50,
     stage2_variance_mode: str = "full",
     stage2_keys: Optional[list] = None,
+    stage2_scheduler: str = "cosine",
+    stage2_min_lr: float = 1e-5,
     # Common
     use_crn: bool = True,
     crn_seed: int = 42,
     log_every: int = 20,
 ) -> dict:
     """
-    Two-stage calibration following Adachi et al.
+    Two-stage AMCC calibration following Gonon et al. (2025), adapted for the
+    Mapped Rough SABR FMM of Adachi et al. (2025).
 
-    Stage 1: Approximate scheme (H differentiable).
-        - Fewer paths, more iterations, simplified variance curve
-        - Optimizes ALL parameters including H
-        - Use 1Y-tenor smiles as in the paper's first step
+    The two stages differ only in how fBm is sampled:
 
-    Stage 2: Exact Cholesky scheme (H fixed).
-        - More paths, fewer iterations, full variance curve
-        - H frozen at Stage 1 value
-        - Calibrate α, ρ₀, ρ for precise fit
+      Stage 1 — Approximate kernel discretization (§4.1 of Gonon).
+        W̃^H_{t_{i+1}} ≈ Σ_{k=0}^{i} ((i+1-k)h)^{H-1/2} ΔW⁰_k
+        Pros:  H lives inside the computational graph → backprop through H.
+        Cons:  O(M²) per path, discretization bias.
+        Use:   Explore H landscape with "simplified" variance curve.
+
+      Stage 2 — Exact Cholesky sampling (§4.2 of Gonon).
+        Joint (W̃^H, W⁰) drawn from precomputed 2M×2M covariance.
+        Pros:  Unbiased fBm, O(M) per path after setup.
+        Cons:  H frozen (Cholesky computed outside the graph).
+        Use:   Refine α, ρ₀, Σ with "full" variance curve.
+
+    Learning rate schedule:
+      Default is CosineAnnealingLR, which decays lr smoothly from the initial
+      value to min_lr over the full iteration budget. Unlike ReduceLROnPlateau,
+      it does not depend on noisy MC loss signals and won't kill the lr prematurely.
 
     Args:
         params:  MappedRoughSABRParams (modified in place)
         mkt:     MarketData
         stage1/stage2 settings: see calibrate() for details
+        stage1_scheduler, stage2_scheduler: "cosine" or "plateau"
+        stage1_min_lr, stage2_min_lr: minimum learning rate for each stage
 
     Returns:
-        dict with stage1_result, stage2_result, and final params
+        dict with stage1_result, stage2_result, and H_calibrated
     """
+    # ================================================================
+    # STAGE 1: Approximate scheme — H differentiable
+    # ================================================================
     print("=" * 60)
     print("STAGE 1: Approximate scheme (H differentiable)")
+    print(f"  {stage1_iterations} iters × {stage1_N_paths:,} paths × {stage1_M} steps")
+    print(f"  lr={stage1_lr:.1e} → {stage1_min_lr:.1e}  ({stage1_scheduler})")
     print("=" * 60)
 
     params.unfix_H()
@@ -1954,6 +1993,8 @@ def calibrate_two_stage(
         use_crn=use_crn, crn_seed=crn_seed,
         log_every=log_every,
         swaption_keys=stage1_keys,
+        scheduler_type=stage1_scheduler,
+        min_lr=stage1_min_lr,
     )
 
     # Load best Stage 1 parameters
@@ -1964,8 +2005,13 @@ def calibrate_two_stage(
         H_calibrated = params.get_H().item()
     print(f"\nStage 1 complete. H = {H_calibrated:.4f}")
 
+    # ================================================================
+    # STAGE 2: Exact Cholesky scheme — H frozen
+    # ================================================================
     print("\n" + "=" * 60)
     print(f"STAGE 2: Exact Cholesky scheme (H fixed at {H_calibrated:.4f})")
+    print(f"  {stage2_iterations} iters × {stage2_N_paths:,} paths × {stage2_M} steps")
+    print(f"  lr={stage2_lr:.1e} → {stage2_min_lr:.1e}  ({stage2_scheduler})")
     print("=" * 60)
 
     params.fix_H()
@@ -1977,6 +2023,8 @@ def calibrate_two_stage(
         use_crn=use_crn, crn_seed=crn_seed + 10000,
         log_every=log_every,
         swaption_keys=stage2_keys,
+        scheduler_type=stage2_scheduler,
+        min_lr=stage2_min_lr,
     )
 
     # Load best Stage 2 parameters

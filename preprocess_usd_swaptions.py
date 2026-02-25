@@ -49,9 +49,9 @@ THETA = 1.0
 OTM_OFFSETS_BPS = [-200, -100, -50, -25, 25, 50, 100, 200]
 
 # Paths to data files
-SOFR_PATH = "data/SOFRRates.xlsx"
-ATM_PATH  = "data/ATMSwaptionIVUSD.xlsx"
-OTM_PATH  = "data/OTMSwaptionIVUSD.xlsx"
+SOFR_PATH = "09122024/SOFRRates.xlsx"
+ATM_PATH  = "09122024/ATMSwaptionIVUSD.xlsx"
+OTM_PATH  = "09122024/OTMSwaptionIVUSD.xlsx"
 
 
 # =============================================================================
