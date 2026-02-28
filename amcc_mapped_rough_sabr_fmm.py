@@ -74,7 +74,7 @@ def bachelier_to_black_iv(S0, K, T, sigma_n, annuity, is_call=True):
 
 
 # =============================================================================
-# Layer 0: Market data container
+# Layer 1: Market data container
 # =============================================================================
 
 @dataclass
@@ -90,6 +90,7 @@ class SwaptionData:
     pi: torch.Tensor            # Normalized weights pi_j, shape (J-I,)
     strikes: torch.Tensor       # Strike grid, shape (n_strikes,)
     ivs_black: torch.Tensor     # Black (lognormal) IVs, shape (n_strikes,)
+    ivs_normal: torch.Tensor    # Bachelier (normal) IVs in decimal, shape (n_strikes,)
     is_call: torch.Tensor       # OTM flag, shape (n_strikes,)
     target_prices: torch.Tensor # Black model prices, shape (n_strikes,)
     vegas: torch.Tensor         # Black vegas for weighting, shape (n_strikes,)
@@ -126,20 +127,24 @@ class MarketData:
 def load_market_data(
     pkl_path: str,
     subset: str = "joint_all_smiles",
-    convert_otm_from_bachelier: bool = True,
+    date: str = "2024-12-09",
     device: str = "cpu",
-) -> MarketData:
+) -> 'MarketData':
     """
     Load preprocessed market data and convert to torch tensors.
 
+    The pickle file contains data for multiple dates, each with its own
+    SOFR curve and swaption IVs.  All IVs are stored as Bachelier (normal)
+    vol in decimal; the Black (lognormal) IV conversion is done during
+    preprocessing and stored alongside.
+
     Args:
-        pkl_path: Path to the pickle from preprocess_usd_swaptions.py
-        subset: Which calibration subset to load. One of:
-                'stage1_1y_tenor', 'stage1_alpha_expiries',
-                'stage2_multi_tenor', 'joint_all_smiles', 'joint_all_atm'
-        convert_otm_from_bachelier: If True, treat OTM IVs as Bachelier (bps)
-                                     and convert to Black IVs.
-        device: torch device ('cpu' or 'cuda')
+        pkl_path: Path to the multi-date pickle from preprocess_usd_swaptions.py
+        subset:   Which calibration subset to load. One of:
+                  'stage1_1y_tenor', 'stage1_alpha_expiries',
+                  'stage2_multi_tenor', 'joint_all_smiles', 'joint_all_atm'
+        date:     Date string, e.g. '2024-12-09'. Must be present in the pickle.
+        device:   torch device ('cpu' or 'cuda')
 
     Returns:
         MarketData object with all tensors on the specified device.
@@ -147,64 +152,84 @@ def load_market_data(
     with open(pkl_path, "rb") as f:
         raw = pickle.load(f)
 
-    N = raw["metadata"]["T_N"]
-    theta = raw["metadata"]["theta"]
+    # --- Multi-date or legacy format detection ---
+    if "dates" in raw and date in raw:
+        # New multi-date format
+        date_data = raw[date]
+        N = date_data["T_N"]
+        theta = date_data["theta"]
+        P_np = date_data["discount_factors"][:N + 1]
+        R_np = date_data["forward_term_rates"][:N + 1]
+        swaptions_raw = date_data["swaptions"]
+        subset_keys_all = date_data["calibration_subsets"]
+    elif "metadata" in raw and "swaptions" in raw:
+        # Legacy single-date format (backward compatibility)
+        N = raw["metadata"]["T_N"]
+        theta = raw["metadata"]["theta"]
+        P_np = raw["discount_factors"][:N + 1]
+        R_np = raw["forward_term_rates"][:N + 1]
+        swaptions_raw = raw["swaptions"]
+        subset_keys_all = raw.get("calibration_subsets", {})
+    else:
+        raise ValueError(f"Unknown pickle format. Available keys: {list(raw.keys())}")
 
-    # Discount factors and forward rates
-    P = torch.tensor(raw["discount_factors"][:N + 1], dtype=torch.float64, device=device)
-    R = torch.tensor(raw["forward_term_rates"][:N + 1], dtype=torch.float64, device=device)
+    P = torch.tensor(P_np, dtype=torch.float64, device=device)
+    R = torch.tensor(R_np, dtype=torch.float64, device=device)
 
     # Select swaption subset
-    subset_keys_all = raw["calibration_subsets"]
-    active_keys = subset_keys_all.get(subset, list(raw["swaptions"].keys()))
+    active_keys = subset_keys_all.get(subset, list(swaptions_raw.keys()))
 
     swaptions = {}
     for key in active_keys:
-        swn_raw = raw["swaptions"][key]
+        swn_raw = swaptions_raw[key]
         I, J = swn_raw["I"], swn_raw["J"]
         S0 = swn_raw["S0"]
         A0 = swn_raw["A0"]
+        T_exp = swn_raw["expiry_years"]
 
         strikes_np = swn_raw["strikes"]
-        ivs_raw = swn_raw["ivs"]
         is_call_np = swn_raw["is_call"]
-
-        # ---------------------------------------------------------------
-        # IV Convention handling
-        # ATM point: always Black (lognormal) IV in decimal
-        # OTM points: Bachelier (normal) IV in bps (raw value / 100 = decimal,
-        #             but that decimal is the Bachelier vol, not Black!)
-        # ---------------------------------------------------------------
         n_strikes = len(strikes_np)
-        atm_mask = np.abs(strikes_np - S0) < 1e-10
-        otm_mask = ~atm_mask
 
-        if convert_otm_from_bachelier and np.any(otm_mask):
+        # --- IV handling ---
+        # New format: both ivs_normal and ivs_black are pre-computed
+        if "ivs_black" in swn_raw and "ivs_normal" in swn_raw:
+            ivs_black_np = swn_raw["ivs_black"]
+            ivs_normal_np = swn_raw["ivs_normal"]
+        elif "ivs_normal" in swn_raw:
+            # Only normal: convert to Black
+            ivs_normal_np = swn_raw["ivs_normal"]
+            ivs_black_np = np.array([
+                bachelier_to_black_iv(S0, K, T_exp, sig_n, A0, bool(ic))
+                for K, sig_n, ic in zip(strikes_np, ivs_normal_np, is_call_np)
+            ])
+        else:
+            # Legacy: ivs field with mixed convention
+            ivs_raw = swn_raw["ivs"]
+            atm_mask = np.abs(strikes_np - S0) < 1e-10
+            otm_mask = ~atm_mask
             ivs_black_np = np.copy(ivs_raw)
 
-            for i in np.where(otm_mask)[0]:
-                # Raw OTM value was divided by 100 in preprocessing,
-                # giving e.g. 0.965 for 96.5 bps.
-                # True Bachelier vol in decimal: raw_bps / 10000.
-                # Since preprocessing did raw/100, we need another /100.
-                sigma_n = ivs_raw[i] / 100.0  # bps -> decimal
+            if np.any(otm_mask):
+                for i in np.where(otm_mask)[0]:
+                    sigma_n = ivs_raw[i] / 100.0
+                    iv_b = bachelier_to_black_iv(
+                        S0, strikes_np[i], T_exp,
+                        sigma_n, A0, bool(is_call_np[i])
+                    )
+                    ivs_black_np[i] = iv_b if not np.isnan(iv_b) else ivs_raw[i]
 
-                iv_black = bachelier_to_black_iv(
-                    S0, strikes_np[i], swn_raw["expiry_years"],
-                    sigma_n, A0, bool(is_call_np[i])
-                )
-                ivs_black_np[i] = iv_black if not np.isnan(iv_black) else ivs_raw[i]
-        else:
-            ivs_black_np = ivs_raw
+            # Approximate normal vol for legacy data
+            ivs_normal_np = np.array([
+                sig_b * S0 for sig_b in ivs_black_np
+            ])
 
-        # Recompute Black prices with correct IVs
-        T_exp = swn_raw["expiry_years"]
+        # Compute Black prices and vegas
         prices_np = np.array([
             float(black_price_np(S0, K, T_exp, sig, A0, ic))
             for K, sig, ic in zip(strikes_np, ivs_black_np, is_call_np)
         ])
 
-        # Compute vegas
         sqrt_T = np.sqrt(T_exp)
         vegas_np = np.array([
             float(A0 * S0 * sqrt_T * norm.pdf(
@@ -223,6 +248,7 @@ def load_market_data(
             pi=torch.tensor(swn_raw["normalized_weights_pi"], dtype=torch.float64, device=device),
             strikes=torch.tensor(strikes_np, dtype=torch.float64, device=device),
             ivs_black=torch.tensor(ivs_black_np, dtype=torch.float64, device=device),
+            ivs_normal=torch.tensor(ivs_normal_np, dtype=torch.float64, device=device),
             is_call=torch.tensor(is_call_np, dtype=torch.bool, device=device),
             target_prices=torch.tensor(prices_np, dtype=torch.float64, device=device),
             vegas=torch.tensor(vegas_np, dtype=torch.float64, device=device),
@@ -248,7 +274,7 @@ def load_market_data(
 
 
 # =============================================================================
-# Layer 1: Parameter module with smooth constraints
+# Layer 0: Parameter module with smooth constraints
 # =============================================================================
 
 class MappedRoughSABRParams(nn.Module):
@@ -273,7 +299,7 @@ class MappedRoughSABRParams(nn.Module):
 
     Constrained parameter space:
         H       ∈ (0, 0.5)     Hurst exponent
-        kappa   ∈ (0, ∞)       Vol-of-vol kernel scaling
+        eta     ∈ (0, ∞)       Vol-of-vol (η in the rBergomi convention)
         alpha_j ∈ (0, ∞)       Variance level per forward rate, j=1,...,N
         Σ       (N+1)×(N+1)    Unified correlation matrix via Rapisarda
           └─ ρ_{0,j} ∈ (-1, 0)    spot-vol correlations  [from Σ[0, 1:]]
@@ -281,7 +307,7 @@ class MappedRoughSABRParams(nn.Module):
 
     Unconstrained → constrained mappings:
         H     = 0.5 · sigmoid(H̃)
-        kappa = softplus(κ̃)
+        eta   = softplus(η̃)
         alpha = softplus(α̃)
         ω_{i,0} = π/2 + (π/2)·sigmoid(ω̃_{i,0})   ∈ (π/2, π)   [→ ρ₀<0]
         ω_{i,j} = π · sigmoid(ω̃_{i,j})             ∈ (0, π)     [j ≥ 1]
@@ -306,11 +332,11 @@ class MappedRoughSABRParams(nn.Module):
             torch.tensor(-0.405, dtype=torch.float64, device=device)
         )
 
-        # Vol-of-vol: kappa ∈ (0, ∞)
-        # Initialize near kappa = 1.0
-        # softplus⁻¹(1.0) = log(exp(1)-1) ≈ 0.541
-        self.kappa_tilde = nn.Parameter(
-            torch.tensor(0.541, dtype=torch.float64, device=device)
+        # Vol-of-vol: eta ∈ (0, ∞) — matches the rBergomi convention η
+        # Initialize near eta = 2.3 (notebook default)
+        # softplus⁻¹(2.3) = log(exp(2.3)-1) ≈ 2.194
+        self.eta_tilde = nn.Parameter(
+            torch.tensor(2.194, dtype=torch.float64, device=device)
         )
 
         # Variance levels: alpha_j ∈ (0, ∞), j = 1,...,N
@@ -344,9 +370,9 @@ class MappedRoughSABRParams(nn.Module):
         """Hurst exponent H ∈ (0, 0.5)."""
         return 0.5 * torch.sigmoid(self.H_tilde)
 
-    def get_kappa(self) -> torch.Tensor:
-        """Vol-of-vol kernel scaling kappa ∈ (0, ∞)."""
-        return nn.functional.softplus(self.kappa_tilde)
+    def get_eta(self) -> torch.Tensor:
+        """Vol-of-vol eta ∈ (0, ∞) — rBergomi convention."""
+        return nn.functional.softplus(self.eta_tilde)
 
     def get_alpha(self) -> torch.Tensor:
         """Variance levels alpha_j ∈ (0, ∞), shape (N,)."""
@@ -430,7 +456,7 @@ class MappedRoughSABRParams(nn.Module):
 
         Returns dict with:
             H:         scalar tensor
-            kappa:     scalar tensor
+            eta:       scalar tensor — vol-of-vol
             alpha:     shape (N,)
             rho0:      shape (N,)       — Σ[0, 1:]
             rho:       shape (N, N)     — Σ[1:, 1:]
@@ -439,7 +465,7 @@ class MappedRoughSABRParams(nn.Module):
         Sigma = self.get_full_correlation_matrix()
         return {
             "H": self.get_H(),
-            "kappa": self.get_kappa(),
+            "eta": self.get_eta(),
             "alpha": self.get_alpha(),
             "rho0": Sigma[0, 1:],
             "rho": Sigma[1:, 1:],
@@ -453,7 +479,7 @@ class MappedRoughSABRParams(nn.Module):
             lines = [
                 "=== Mapped Rough SABR FMM Parameters ===",
                 f"H     = {p['H'].item():.4f}",
-                f"kappa = {p['kappa'].item():.4f}",
+                f"eta   = {p['eta'].item():.4f}",
                 f"alpha = {p['alpha'].numpy()}",
                 f"rho0  = {p['rho0'].numpy()}",
                 f"rho   = (N×N matrix, diag check: {torch.diag(p['rho']).numpy()})",
@@ -477,11 +503,11 @@ class MappedRoughSABRParams(nn.Module):
             x = 2.0 * H_value
             self.H_tilde.fill_(np.log(x / (1.0 - x)))
 
-    def set_kappa(self, kappa_value: float):
-        """Set kappa to a specific value."""
+    def set_eta(self, eta_value: float):
+        """Set eta to a specific value."""
         with torch.no_grad():
-            # Invert softplus: κ = log(1+exp(x)) ⇒ x = log(exp(κ)-1)
-            self.kappa_tilde.fill_(np.log(np.exp(kappa_value) - 1.0))
+            # Invert softplus: η = log(1+exp(x)) ⇒ x = log(exp(η)-1)
+            self.eta_tilde.fill_(np.log(np.exp(eta_value) - 1.0))
 
 
 # =============================================================================
@@ -490,8 +516,8 @@ class MappedRoughSABRParams(nn.Module):
 #
 # From Adachi et al. §6.2, the forward variance curve for rate j is:
 #
-#   ξ_j(t) = α_j² exp{ κ²t^{2H}/(8H)
-#            − Σ_{i=j+1}^{N} [θ_i η_i(R⁰_i)/(1+θ_i R⁰_i)] α_i ρ_{0i} κ
+#   ξ_j(t) = α_j² exp{ η²t^{2H}/4
+#            − Σ_{i=j+1}^{N} [θ_i η_i(R⁰_i)/(1+θ_i R⁰_i)] α_i ρ_{0i} η√(2H)
 #              × ∫₀ᵗ (t−s)^{H−1/2} γ_i(s) ds }                   (p.22)
 #
 # where γ_i is the piecewise linear vol loading from eq. (14):
@@ -510,8 +536,13 @@ class MappedRoughSABRParams(nn.Module):
 #
 # Simplified first-step version (§6.1, p.21):
 #   Assuming E*[√V_t] = √V_0, we set
-#     v(t) = v(0) exp(κ² t^{2H} / (8H))
+#     v(t) = v(0) exp(η² t^{2H} / 4)
 #   which coincides with log-normal SABR when H = 0.5.
+#
+# Vol-of-vol convention:
+#   η is the rBergomi vol-of-vol parameter as in Bayer, Friz & Gatheral.
+#   V_t = v(0)·ξ(t)·exp(η√(2H) W̃ᴴ_t − η²/2 · t^{2H})
+#   Some references use κ = η√(2H); we follow the notebook and use η directly.
 
 def volterra_gamma_integral(
     t: torch.Tensor,
@@ -550,7 +581,7 @@ def compute_xi_full(
     t_grid: torch.Tensor,
     j: int,
     H: torch.Tensor,
-    kappa: torch.Tensor,
+    eta: torch.Tensor,
     alpha: torch.Tensor,
     rho0: torch.Tensor,
     R: torch.Tensor,
@@ -560,15 +591,15 @@ def compute_xi_full(
     """
     Layer 2 (full): Compute ξ_j(t) on a time grid using Adachi eq. (p.22).
 
-    ξ_j(t) = α_j² exp{ κ²t^{2H}/(8H) − Σ_{i=j+1}^{N} c_i · ∫₀ᵗ ... ds }
+    ξ_j(t) = α_j² exp{ η²t^{2H}/4 − Σ_{i=j+1}^{N} c_i · ∫₀ᵗ ... ds }
 
-    where c_i = [θ_i R⁰_i/(1+θ_i R⁰_i)] α_i ρ_{0i} κ.
+    where c_i = [θ_i R⁰_i/(1+θ_i R⁰_i)] α_i ρ_{0i} η√(2H).
 
     Args:
         t_grid: shape (M,) — time points
         j:      int — 1-indexed forward rate index
         H:      scalar Hurst parameter
-        kappa:  scalar vol-of-vol
+        eta:    scalar vol-of-vol (rBergomi convention)
         alpha:  shape (N,) — 0-indexed vol levels  (alpha[i-1] = α_i)
         rho0:   shape (N,) — 0-indexed spot-vol     (rho0[i-1] = ρ_{0,i})
         R:      shape (N+1,) — forward rates R[i] = R_i  (1-indexed in storage)
@@ -580,18 +611,19 @@ def compute_xi_full(
     """
     alpha_j = alpha[j - 1]  # 0-indexed
     two_H = 2.0 * H
+    sqrt_2H = torch.sqrt(two_H)
 
-    # Growth term: κ² t^{2H} / (8H)
-    exponent = (kappa ** 2 * t_grid ** two_H) / (8.0 * H)
+    # Growth term: η² t^{2H} / 4
+    exponent = eta ** 2 * t_grid ** two_H / 4.0
 
     # Drift correction: sum over i = j+1, ..., N
     for i in range(j + 1, N + 1):
-        # Coefficient:  θ_i R⁰_i / (1 + θ_i R⁰_i) · α_i · ρ_{0,i} · κ
+        # Coefficient:  θ_i R⁰_i / (1 + θ_i R⁰_i) · α_i · ρ_{0,i} · η√(2H)
         R_i = R[i]                    # R_i  (1-indexed in R tensor)
         c_i = (theta * R_i / (1.0 + theta * R_i)
                * alpha[i - 1]        # α_i  (0-indexed)
                * rho0[i - 1]         # ρ_{0,i}  (0-indexed)
-               * kappa)
+               * eta * sqrt_2H)
 
         # T_{i-1}, T_i for annual grid
         T_i_minus_1 = float(i - 1) * theta
@@ -672,7 +704,7 @@ def compute_v_curve(
     swn: "SwaptionData",
     mkt: "MarketData",
     H: torch.Tensor,
-    kappa: torch.Tensor,
+    eta: torch.Tensor,
     alpha: torch.Tensor,
     rho0: torch.Tensor,
     rho_matrix: torch.Tensor,
@@ -685,14 +717,14 @@ def compute_v_curve(
     Three modes:
         "full"       — compute ξ_j(t) for each tenor j, then v(t) via eq. (22),
                         then normalize by v(0).
-        "simplified" — v(t)/v(0) = exp(κ² t^{2H} / (8H))  (first-step, §6.1)
+        "simplified" — v(t)/v(0) = exp(η² t^{2H} / 4)  (first-step, §6.1)
         "constant"   — v(t)/v(0) = 1  (flat baseline)
 
     Args:
         time_grid:  shape (M,) — simulation time points
         swn:        SwaptionData
         mkt:        MarketData (for R, theta, N)
-        H, kappa, alpha, rho0, rho_matrix: model parameters
+        H, eta, alpha, rho0, rho_matrix: model parameters
         v0:         scalar — v(0) from compute_effective_params
         mode:       "full", "simplified", or "constant"
 
@@ -705,9 +737,9 @@ def compute_v_curve(
         return torch.ones(M, dtype=torch.float64, device=time_grid.device)
 
     if mode == "simplified":
-        # v(t) = v(0) exp(κ² t^{2H} / (8H))   →   ratio = exp(...)
+        # v(t) = v(0) exp(η² t^{2H} / 4)   →   ratio = exp(...)
         two_H = 2.0 * H
-        return torch.exp(kappa ** 2 * time_grid ** two_H / (8.0 * H))
+        return torch.exp(eta ** 2 * time_grid ** two_H / 4.0)
 
     if mode == "full":
         I, J = swn.I, swn.J
@@ -718,7 +750,7 @@ def compute_v_curve(
         # xi_all: shape (n_rates, M)
         xi_all = torch.stack([
             compute_xi_full(
-                time_grid, j=I + 1 + k, H=H, kappa=kappa,
+                time_grid, j=I + 1 + k, H=H, eta=eta,
                 alpha=alpha, rho0=rho0, R=mkt.R, theta=mkt.theta, N=mkt.N,
             )
             for k in range(n_rates)
@@ -749,19 +781,18 @@ def compute_v_curve(
 #
 # The mapped model (eq. 23):
 #     dS*/S* = √V_t dW*,     S*_0 = S₀
-#     V_t = v(t) exp(∫₀ᵗ ζ(t-s) dW^{0*}_s - ½ ∫₀ᵗ ζ(t-s)² ds)
-#     ζ(t) = κ t^{H-1/2}
+#     V_t = v(t) exp(η√(2H) W̃ᴴ_t − η²/2 · t^{2H})
 #     ⟨W^{0*}, W*⟩_t = ρ_eff t
 #
-# Writing Y_t = ∫₀ᵗ κ(t-s)^{H-1/2} dW^{0*}_s = κ W̃^H_t, we get:
-#     V_t = v(t) exp(κ W̃^H_t - κ²/(4H) t^{2H})
-#
-# where W̃^H_t is the Riemann-Liouville fBM: Var[W̃^H_t] = t^{2H}/(2H).
-#
-# Two simulation schemes:
-#  (a) Exact: Cholesky of 2M×2M covariance matrix of (W̃^H, W) — fast,
-#      but H is not differentiable (Cholesky computed outside the graph).
-#  (b) Approximate: kernel discretization — slower, H differentiable.
+# Three simulation schemes:
+#  (a) Exact: Cholesky of 2M×2M covariance matrix of (W̃^H, W).
+#      Accurate; but H not differentiable (Cholesky outside graph).
+#  (b) Approximate: naive Riemann-sum kernel discretization.
+#      H differentiable; but poor near the singularity for rough H.
+#  (c) Hybrid (BLP 2017): near field (last κ cells) via exact Wiener
+#      integrals of the power kernel + far field via optimal Riemann sum.
+#      H differentiable AND accurate — best of both worlds.
+#      Uses only a tiny (κ+1)×(κ+1) Cholesky (κ=2 recommended).
 
 def covariance_matrix_rBergomi(H: float, M: int, T: float) -> np.ndarray:
     """
@@ -838,7 +869,7 @@ def build_cholesky(H: float, M: int, T: float, device: str = "cpu") -> torch.Ten
 def simulate_exact(
     S0: torch.Tensor,
     v0: torch.Tensor,
-    kappa: torch.Tensor,
+    eta: torch.Tensor,
     H: torch.Tensor,
     rho_eff: torch.Tensor,
     T: float,
@@ -855,12 +886,12 @@ def simulate_exact(
 
     The dynamics:
         log(S*_{t_{i+1}}) = log(S*_{t_i}) - ½ V_{t_i} h + √V_{t_i} (ρ ΔW⁰_i + √(1-ρ²) ΔW⊥_i)
-        V_{t_i} = v(t_i) exp(κ W̃^H_{t_i} - κ²/(4H) t_i^{2H})
+        V_{t_i} = v(t_i) exp(η√(2H) W̃^H_{t_i} - η²/2 · t_i^{2H})
 
     Args:
         S0:         scalar — initial forward swap rate
         v0:         scalar — v(0) = wᵀρw (aggregated forward variance)
-        kappa:      scalar — vol-of-vol kernel scaling
+        eta:        scalar — vol-of-vol (rBergomi convention)
         H:          scalar — Hurst parameter (used only for the correction term)
         rho_eff:    scalar — effective spot-vol correlation
         T:          float — swaption expiry
@@ -889,11 +920,11 @@ def simulate_exact(
     # Initialize
     log_S = torch.log(S0) * torch.ones(N_paths, dtype=torch.float64, device=device)
 
-    # Correction term: κ²/(4H) · t^{2H}
-    # Notebook uses η with: -η²/2 · t^{2H}.  With κ = η√(2H):
-    # -κ²/(4H) · t^{2H} = -η²/2 · t^{2H}  ✓
+    # Correction term: -η²/2 · t^{2H}
+    # Matches notebook: -self.eta**2 / 2 * ((i+1)*h)**(2*H)
     two_H = 2.0 * H
-    kappa_sq = kappa ** 2
+    sqrt_2H = torch.sqrt(two_H)
+    eta_sq = eta ** 2
 
     # Initialize variance at LEFT endpoint (t = 0): V(0) = v(0)
     # This matches the notebook: vol_states = torch.ones(...) * self.v0
@@ -920,8 +951,9 @@ def simulate_exact(
         log_S = log_S - 0.5 * V_current * h + torch.sqrt(V_current) * brownian_incr
 
         # --- Step 2: Update variance to RIGHT endpoint V(t_{i+1}) for next step ---
-        correction = kappa_sq / (2.0 * two_H) * t_next ** two_H
-        V_next = v0 * torch.exp(kappa * fBm_next - correction)
+        # V = v0 · ξ(t) · exp(η√(2H) · W̃ᴴ_t − η²/2 · t^{2H})
+        correction = eta_sq / 2.0 * t_next ** two_H
+        V_next = v0 * torch.exp(eta * sqrt_2H * fBm_next - correction)
 
         # Forward variance curve adjustment
         if v_curve is not None:
@@ -936,7 +968,7 @@ def simulate_exact(
 def simulate_approx(
     S0: torch.Tensor,
     v0: torch.Tensor,
-    kappa: torch.Tensor,
+    eta: torch.Tensor,
     H: torch.Tensor,
     rho_eff: torch.Tensor,
     T: float,
@@ -971,7 +1003,8 @@ def simulate_approx(
 
     log_S = torch.log(S0) * torch.ones(N_paths, dtype=torch.float64, device=device)
     two_H = 2.0 * H
-    kappa_sq = kappa ** 2
+    sqrt_2H = torch.sqrt(two_H)
+    eta_sq = eta ** 2
 
     # Initialize variance at LEFT endpoint (t = 0): V(0) = v(0)
     # This matches the notebook: vol_states = torch.ones(...) * self.v0
@@ -992,8 +1025,296 @@ def simulate_approx(
         kernels = lags ** (H - 0.5)  # shape (i+1,)
         fBm_next = dW0[:, 0:i+1] @ kernels  # shape (N_paths,)
 
-        correction = kappa_sq / (2.0 * two_H) * t_next ** two_H
-        V_next = v0 * torch.exp(kappa * fBm_next - correction)
+        # V = v0 · ξ(t) · exp(η√(2H) · W̃ᴴ_t − η²/2 · t^{2H})
+        correction = eta_sq / 2.0 * t_next ** two_H
+        V_next = v0 * torch.exp(eta * sqrt_2H * fBm_next - correction)
+
+        if v_curve is not None:
+            V_next = V_next * v_curve[i]
+
+        V_next = torch.clamp(V_next, min=0.0)
+        V_current = V_next
+
+    return torch.exp(log_S)
+
+
+# ---------------------------------------------------------------------------
+# BLP Hybrid scheme (Bennedsen, Lunde & Pakkanen, Finance & Stochastics 2017)
+# ---------------------------------------------------------------------------
+#
+# Splits the Volterra integral for the fBm into a NEAR field (last κ cells,
+# handled via exact Wiener integrals of the power kernel) and a FAR field
+# (remaining cells, Riemann-sum with optimal evaluation points b*_k).
+#
+# The near-field covariance matrix Σ is only (κ+1)×(κ+1)  (κ = 2 or 3),
+# so torch.linalg.cholesky keeps H in the computational graph.
+# The far-field weights (b*_k)^α · h^α are also computed in the graph.
+# ⇒ H is fully differentiable — no two-stage compromise needed.
+#
+# Reference: BLP (2017) eq. (3.7) & §3.1 for the TBSS (truncated BSS)
+#            specialised to the power kernel g(x) = x^α, α = H − ½.
+# ---------------------------------------------------------------------------
+
+
+def _gauss_legendre_nodes_weights(n_quad: int = 64):
+    """
+    Return Gauss-Legendre nodes and weights on [0, 1] (numpy, float64).
+    Cached at module level after first call.
+    """
+    x_gl, w_gl = np.polynomial.legendre.leggauss(n_quad)
+    # transform from [-1, 1] to [0, 1]
+    nodes = 0.5 * (x_gl + 1.0)
+    weights = 0.5 * w_gl
+    return nodes, weights
+
+
+# Module-level cache (computed once)
+_GL64_NODES, _GL64_WEIGHTS = _gauss_legendre_nodes_weights(64)
+
+
+def build_hybrid_covariance(
+    alpha: torch.Tensor,
+    h: float,
+    kappa: int,
+    device: str = "cpu",
+) -> torch.Tensor:
+    """
+    Build the (κ+1)×(κ+1) covariance matrix Σ for the BLP hybrid scheme.
+
+    The random vector at each time step is:
+        W⃗ᵢ = (ΔWᵢ,  W^near_{i,1},  …,  W^near_{i,κ})
+
+    where ΔWᵢ is the BM increment and W^near_{i,j} is the Wiener integral
+        W^near_{i,j} = ∫_{ih}^{(i+1)h} ((i+j)h − s)^α  dW(s)
+
+    Entries (Itô isometry, substituting u = s − ih):
+
+        Σ[0,0] = h
+
+        Σ[0,j] = h^{α+1}/(α+1) · (j^{α+1} − (j−1)^{α+1})     j=1…κ
+
+        Σ[j,k] = h^{2α+1} · ∫₀¹ (j−u)^α (k−u)^α du           j,k=1…κ
+
+    The last integral is computed via 64-point Gauss-Legendre quadrature
+    in torch, keeping α (and hence H) in the graph.
+
+    Args:
+        alpha:  scalar tensor — roughness index α = H − ½  (in graph)
+        h:      float — time step size T/M
+        kappa:  int — number of near-field cells (typically 2 or 3)
+        device: torch device
+
+    Returns:
+        Σ: tensor of shape (kappa+1, kappa+1), dtype float64
+    """
+    dim = kappa + 1
+    Sigma = torch.zeros(dim, dim, dtype=torch.float64, device=device)
+
+    # Quadrature nodes/weights on [0,1]
+    u = torch.tensor(_GL64_NODES, dtype=torch.float64, device=device)  # (64,)
+    w = torch.tensor(_GL64_WEIGHTS, dtype=torch.float64, device=device)
+
+    alpha1 = alpha + 1.0      # α + 1
+    two_alpha1 = 2.0 * alpha + 1.0  # 2α + 1
+    h_t = torch.tensor(h, dtype=torch.float64, device=device)
+
+    # --- Σ[0,0] = h ---
+    Sigma[0, 0] = h_t
+
+    for j in range(1, dim):
+        jf = float(j)
+
+        # --- Σ[0,j] = h^{α+1}/(α+1) · (j^{α+1} − (j−1)^{α+1}) ---
+        j_t = torch.tensor(jf, dtype=torch.float64, device=device)
+        jm1_t = torch.tensor(jf - 1.0, dtype=torch.float64, device=device)
+
+        cov_0j = (h_t ** alpha1 / alpha1) * (j_t ** alpha1 - jm1_t ** alpha1)
+        Sigma[0, j] = cov_0j
+        Sigma[j, 0] = cov_0j
+
+        for k in range(j, dim):
+            kf = float(k)
+            # --- Σ[j,k] = h^{2α+1} · ∫₀¹ (j−u)^α (k−u)^α du ---
+            # Integrand at quadrature nodes:
+            k_t = torch.tensor(kf, dtype=torch.float64, device=device)
+            integrand = (j_t - u) ** alpha * (k_t - u) ** alpha  # (64,)
+            integral = (w * integrand).sum()
+            cov_jk = h_t ** two_alpha1 * integral
+            Sigma[j, k] = cov_jk
+            if k != j:
+                Sigma[k, j] = cov_jk
+
+    return Sigma
+
+
+def compute_bstar_weights(
+    alpha: torch.Tensor,
+    h: float,
+    kappa: int,
+    M: int,
+    device: str = "cpu",
+) -> torch.Tensor:
+    """
+    Compute optimal far-field kernel weights for the BLP hybrid scheme.
+
+    For k = κ+1, …, M the optimal evaluation point (Proposition 2.8) is:
+
+        b*_k = ((k^{α+1} − (k−1)^{α+1}) / (α+1))^{1/α}
+
+    and the far-field weight is:
+
+        w_k = (b*_k)^α · h^α  =  ((k^{α+1} − (k−1)^{α+1}) / (α+1)) · h^α
+
+    Note: (b*_k)^α simplifies without taking the 1/α root,
+    avoiding numerical issues when α is near zero.
+
+    Args:
+        alpha:  scalar tensor — α = H − ½  (kept in graph)
+        h:      float — step size
+        kappa:  int — number of near-field cells
+        M:      int — total number of time steps
+
+    Returns:
+        weights: tensor of shape (M,) where
+                 weights[k] = far-field kernel weight for lag k+1
+                 (indices 0…κ−1 are zero; κ…M−1 are the active weights)
+    """
+    h_t = torch.tensor(h, dtype=torch.float64, device=device)
+    alpha1 = alpha + 1.0
+    weights = torch.zeros(M, dtype=torch.float64, device=device)
+
+    k_vals = torch.arange(kappa + 1, M + 1, dtype=torch.float64, device=device)
+    km1_vals = k_vals - 1.0
+
+    # (b*_k)^α = (k^{α+1} − (k−1)^{α+1}) / (α+1)
+    bstar_alpha = (k_vals ** alpha1 - km1_vals ** alpha1) / alpha1
+
+    # w_k = (b*_k)^α · h^α
+    far_w = bstar_alpha * h_t ** alpha
+    weights[kappa:] = far_w
+
+    return weights
+
+
+def simulate_hybrid(
+    S0: torch.Tensor,
+    v0: torch.Tensor,
+    eta: torch.Tensor,
+    H: torch.Tensor,
+    rho_eff: torch.Tensor,
+    T: float,
+    M: int,
+    N_paths: int,
+    v_curve: Optional[torch.Tensor] = None,
+    kappa: int = 2,
+) -> torch.Tensor:
+    """
+    Layer 4 (BLP hybrid scheme): Simulate S*_T with H fully differentiable.
+
+    Combines exact Wiener integrals for the last κ cells (near field)
+    with optimally weighted Riemann sums for earlier cells (far field).
+
+    The near-field covariance is a tiny (κ+1)×(κ+1) matrix whose Cholesky
+    decomposition is differentiable via torch.linalg.cholesky.  The far-field
+    kernel weights are also computed in the graph.
+    ⇒ Gradients flow through H, η, ρ simultaneously.
+
+    Implements BLP (2017) eq. (3.7) specialised to the power kernel
+    g(x) = x^α with α = H − ½ and L_g ≡ 1.
+
+    Args:
+        S0:       scalar — initial forward swap rate
+        v0:       scalar — v(0) = wᵀΡw
+        eta:      scalar — vol-of-vol (rBergomi convention)
+        H:        scalar — Hurst parameter (IN the graph)
+        rho_eff:  scalar — effective spot-vol correlation
+        T:        float  — swaption expiry
+        M:        int    — number of time steps
+        N_paths:  int    — number of MC paths
+        v_curve:  Optional shape (M,) — v(tᵢ)/v(0) forward variance curve
+        kappa:    int    — number of near-field cells (default 2, paper
+                           shows κ≥1 already matches exact scheme for α<0)
+
+    Returns:
+        S_T: shape (N_paths,) — terminal swap rate values
+    """
+    h = T / M
+    device = S0.device
+    alpha = H - 0.5          # roughness index, in graph
+    two_H = 2.0 * H
+    sqrt_2H = torch.sqrt(two_H)
+    eta_sq = eta ** 2
+    sqrt_rho = torch.sqrt(1.0 - rho_eff ** 2)
+
+    # ---- 1.  Near-field covariance and Cholesky (differentiable in H) ----
+    Sigma = build_hybrid_covariance(alpha, h, kappa, device=device)
+    # Tiny regularisation for numerical safety (diagonal jitter)
+    Sigma = Sigma + 1e-14 * torch.eye(kappa + 1, dtype=torch.float64, device=device)
+    L_near = torch.linalg.cholesky(Sigma)   # (kappa+1, kappa+1), grads through H
+
+    # ---- 2.  Far-field optimal kernel weights (differentiable in H) ------
+    far_weights = compute_bstar_weights(alpha, h, kappa, M, device=device)  # (M,)
+
+    # ---- 3.  Generate i.i.d. (κ+1)-dimensional Gaussian vectors ----------
+    #   Z shape: (N_paths, M, kappa+1)
+    Z = torch.randn(N_paths, M, kappa + 1, dtype=torch.float64, device=device)
+    # Correlate: W_vec = Z @ L_near^T  →  (N_paths, M, kappa+1)
+    W_vec = Z @ L_near.T
+
+    dW0 = W_vec[:, :, 0]          # BM increments,      (N_paths, M)
+    W_near = W_vec[:, :, 1:]       # near-field integrals (N_paths, M, kappa)
+
+    # ---- 4.  Independent BM for the price equation -----------------------
+    dW_perp = torch.randn(N_paths, M, dtype=torch.float64, device=device) * np.sqrt(h)
+
+    # ---- 5.  Time-stepping -----------------------------------------------
+    log_S = torch.log(S0) * torch.ones(N_paths, dtype=torch.float64, device=device)
+    V_current = v0 * torch.ones(N_paths, dtype=torch.float64, device=device)
+
+    for i in range(M):
+        t_next = (i + 1) * h
+
+        # --- Step 1: Price update using LEFT-endpoint variance V(tᵢ) ---
+        brownian_incr = rho_eff * dW0[:, i] + sqrt_rho * dW_perp[:, i]
+        log_S = log_S - 0.5 * V_current * h + torch.sqrt(V_current) * brownian_incr
+
+        # --- Step 2: fBm at t_{i+1} via hybrid decomposition ---
+        # Index in the paper: we want W̃^H at time (i+1)h.
+        #
+        # Near field:  Σ_{k=1}^{min(i+1,κ)}  W^near_{(i+1)−k, k}
+        #   k=1 → W_near[i,   0]   (lag-1 integral generated at step i)
+        #   k=2 → W_near[i-1, 1]   (lag-2 integral generated at step i-1)
+        #   ...
+        #
+        # Far field:   Σ_{k=κ+1}^{i+1}  far_weights[k-1] · ΔW_{(i+1)−k}
+        #   (indices into dW0 run from i−κ down to 0)
+
+        fBm_val = torch.zeros(N_paths, dtype=torch.float64, device=device)
+
+        # -- Near field --
+        n_near = min(i + 1, kappa)
+        for k in range(1, n_near + 1):
+            # W^near generated at timestep (i+1-k), for lag index k
+            fBm_val = fBm_val + W_near[:, i + 1 - k, k - 1]
+
+        # -- Far field --
+        n_far = i + 1 - kappa  # number of far-field terms
+        if n_far > 0:
+            # Far lags: k = κ+1 … i+1
+            # ΔW indices: (i+1) − k  for k = κ+1…i+1  →  i−κ … 0
+            # So we need dW0[:, 0 : i+1−κ] with weights far_weights[κ : i+1]
+            # Kernel: far_weights[κ], far_weights[κ+1], …, far_weights[i]
+            # dW0:    dW0[:, i−κ],   dW0[:, i−κ−1], …, dW0[:, 0]
+            #
+            # → inner product: dW0[:, 0:n_far].flip(1)  ⊙  far_weights[κ:κ+n_far]
+            # Equivalently: dW0[:, 0:n_far] @ far_weights[κ:κ+n_far].flip(0)
+
+            fw = far_weights[kappa: kappa + n_far]   # (n_far,)
+            fBm_val = fBm_val + dW0[:, 0:n_far] @ fw.flip(0)
+
+        # --- Step 3: Variance update to V(t_{i+1}) ---
+        correction = eta_sq / 2.0 * t_next ** two_H
+        V_next = v0 * torch.exp(eta * sqrt_2H * fBm_val - correction)
 
         if v_curve is not None:
             V_next = V_next * v_curve[i]
@@ -1013,6 +1334,8 @@ def simulate_swaption(
     use_exact: bool = True,
     variance_curve_mode: str = "simplified",
     cholesky_cache: Optional[dict] = None,
+    scheme: Optional[str] = None,
+    hybrid_kappa: int = 2,
 ) -> torch.Tensor:
     """
     End-to-end simulation: Layers 0-4 combined.
@@ -1027,14 +1350,24 @@ def simulate_swaption(
         N_paths:             number of MC paths
         M:                   number of time steps
         use_exact:           True = exact Cholesky scheme, False = approximate
+                             (ignored if `scheme` is provided)
         variance_curve_mode: "full" (eq. 22 with ξ_j from p.22),
-                             "simplified" (v(t)=v(0)exp(κ²t^{2H}/(8H)), §6.1),
+                             "simplified" (v(t)=v(0)exp(η²t^{2H}/4), §6.1),
                              "constant" (v(t)=v(0), flat baseline)
         cholesky_cache:      dict mapping cache_key -> Cholesky factor
+        scheme:              "exact", "approx", or "hybrid"
+                             (overrides use_exact if provided)
+        hybrid_kappa:        number of near-field cells for hybrid scheme
+                             (κ=2 is recommended; BLP show κ≥1 already
+                             matches exact for α<0, i.e. H<0.5)
 
     Returns:
         S_T: shape (N_paths,) — terminal swap rate samples
     """
+    # Backward-compatible scheme resolution
+    if scheme is None:
+        scheme = "exact" if use_exact else "approx"
+
     p = params()
     T = swn.expiry_years
 
@@ -1046,12 +1379,12 @@ def simulate_swaption(
     time_grid = torch.arange(1, M + 1, dtype=torch.float64,
                              device=params._device) * h  # (M,)
     v_curve = compute_v_curve(
-        time_grid, swn, mkt, H=p["H"], kappa=p["kappa"],
+        time_grid, swn, mkt, H=p["H"], eta=p["eta"],
         alpha=p["alpha"], rho0=p["rho0"], rho_matrix=p["rho"],
         v0=eff["v0"], mode=variance_curve_mode,
     )
 
-    if use_exact:
+    if scheme == "exact":
         H_val = p["H"].detach().item()
         cache_key = (round(H_val, 8), T, M)
 
@@ -1063,14 +1396,21 @@ def simulate_swaption(
                 cholesky_cache[cache_key] = L
 
         S_T = simulate_exact(
-            S0=swn.S0, v0=eff["v0"], kappa=p["kappa"],
+            S0=swn.S0, v0=eff["v0"], eta=p["eta"],
             H=p["H"], rho_eff=eff["rho_eff"],
             T=T, M=M, N_paths=N_paths, cholesky_L=L,
             v_curve=v_curve,
         )
-    else:
+    elif scheme == "hybrid":
+        S_T = simulate_hybrid(
+            S0=swn.S0, v0=eff["v0"], eta=p["eta"],
+            H=p["H"], rho_eff=eff["rho_eff"],
+            T=T, M=M, N_paths=N_paths,
+            v_curve=v_curve, kappa=hybrid_kappa,
+        )
+    else:  # "approx"
         S_T = simulate_approx(
-            S0=swn.S0, v0=eff["v0"], kappa=p["kappa"],
+            S0=swn.S0, v0=eff["v0"], eta=p["eta"],
             H=p["H"], rho_eff=eff["rho_eff"],
             T=T, M=M, N_paths=N_paths,
             v_curve=v_curve,
@@ -1121,31 +1461,36 @@ def compute_swaption_prices(
 
 
 # =============================================================================
-# Layer 5b: Rough SABR analytic formula (Theorem 1 / Fukasawa-Gatheral)
+# =============================================================================
+# ATM variance relationship for α matching
 # =============================================================================
 #
-# From Theorem 1 of Adachi et al., the mapped model S* has implied vol:
+# From §6.2 of Adachi et al.: "We determine α_i such that the ATM swaption
+# price computed under the mapped rough Bergomi forward swap model matches
+# the market IV."
 #
-#   σ(k, t) = √v̄(t) · (1 + ψ·k·t^{H−1/2} + o(t^H))
+# At ATM (k=0), the Black implied vol is:
+#   σ_ATM(T) ≈ √v̄(T)
 #
-# where k = log(K/S₀) is log-moneyness and:
+# where v̄(T) = ∫₀¹ v(Ts) ds is the time-averaged forward variance and
+# v(0) = wᵀ ρ w with w_j = π_j α_j.
 #
-#   v̄(t) = ∫₀¹ v(ts) ds                   (time-averaged forward variance)
+# This is NOT an asymptotic expansion — it is simply the definition of
+# time-averaged variance.  The actual smile (OTM IVs) is always computed
+# via Monte Carlo simulation.
 #
-#   ψ = κ / [(2H+1)(H+3/2)·v(0)] · Σ ρ_{0j} π_j √ξ_j(0)
-#     = κ·ρ_eff / [(2H+1)(H+3/2)·√v(0)]
-#
-# At ATM (k = 0):  σ_ATM(t) = √v̄(t)
-#
-# Adachi notes (Appendix B) this formula is less accurate at longer maturities,
-# but it is very fast and useful for: (1) ATM α_i matching, (2) quick
-# calibration, (3) initial parameter guesses before MC refinement.
+# NOTE: An earlier version of this code included a first-order short-time
+# asymptotic skew formula σ(k,t) = √v̄(t)·(1 + ψ·k·t^{H-1/2}) from the
+# Fukasawa-Gatheral line of work.  This was removed because:
+#   (a) Adachi et al. do not use it in their calibration experiment,
+#   (b) it is inaccurate at longer maturities and deeper OTM strikes,
+#   (c) all smile computation should use MC, consistent with the paper.
 
 def compute_vbar(
     T: float,
     v0: torch.Tensor,
     H: torch.Tensor,
-    kappa: torch.Tensor,
+    eta: torch.Tensor,
     mode: str = "simplified",
     swn: "SwaptionData" = None,
     mkt: "MarketData" = None,
@@ -1161,7 +1506,7 @@ def compute_vbar(
         T:     expiry (years)
         v0:    v(0) — aggregated forward variance at t=0
         H:     Hurst parameter
-        kappa: vol-of-vol
+        eta:   vol-of-vol (rBergomi convention)
         mode:  "simplified" or "full"
         swn, mkt, alpha, rho0, rho_matrix: needed for "full" mode
         n_quad: quadrature points
@@ -1182,14 +1527,14 @@ def compute_vbar(
     t_points = T * s  # (n_quad,)
 
     if mode == "simplified":
-        # v(t) = v(0) · exp(κ²t^{2H}/(8H))
+        # v(t) = v(0) · exp(η² t^{2H} / 4)
         two_H = 2.0 * H
-        ratios = torch.exp(kappa ** 2 * t_points ** two_H / (8.0 * H))
+        ratios = torch.exp(eta ** 2 * t_points ** two_H / 4.0)
         vbar = v0 * (w * ratios).sum()
     elif mode == "full":
         assert swn is not None and mkt is not None
         v_curve = compute_v_curve(
-            t_points, swn, mkt, H=H, kappa=kappa,
+            t_points, swn, mkt, H=H, eta=eta,
             alpha=alpha, rho0=rho0, rho_matrix=rho_matrix,
             v0=v0, mode="full",
         )
@@ -1198,73 +1543,6 @@ def compute_vbar(
         raise ValueError(f"Unknown mode: {mode}")
 
     return vbar
-
-
-def rough_sabr_iv(
-    K: torch.Tensor,
-    S0: torch.Tensor,
-    T: float,
-    v0: torch.Tensor,
-    vbar: torch.Tensor,
-    rho_eff: torch.Tensor,
-    H: torch.Tensor,
-    kappa: torch.Tensor,
-) -> torch.Tensor:
-    """
-    Rough SABR implied volatility formula (Theorem 1, first-order).
-
-    σ(k, t) = √v̄(t) · (1 + ψ·k·t^{H−1/2})
-
-    where k = log(K/S₀) and ψ = κ·ρ_eff / [(2H+1)(H+3/2)·√v(0)].
-
-    Args:
-        K:        shape (n_strikes,) — strikes
-        S0:       scalar — forward swap rate
-        T:        float — expiry
-        v0:       scalar — v(0)
-        vbar:     scalar — v̄(T) (from compute_vbar)
-        rho_eff:  scalar — effective correlation
-        H:        scalar — Hurst parameter
-        kappa:    scalar — vol-of-vol
-
-    Returns:
-        shape (n_strikes,) — Black implied volatilities
-    """
-    k = torch.log(K / S0)  # log-moneyness
-    psi = kappa * rho_eff / ((2.0 * H + 1.0) * (H + 1.5) * torch.sqrt(v0 + 1e-30))
-    sigma = torch.sqrt(vbar + 1e-30) * (1.0 + psi * k * T ** (H - 0.5))
-    # Floor at small positive to avoid negative vols
-    return torch.clamp(sigma, min=1e-6)
-
-
-def rough_sabr_prices(
-    swn: "SwaptionData",
-    v0: torch.Tensor,
-    vbar: torch.Tensor,
-    rho_eff: torch.Tensor,
-    H: torch.Tensor,
-    kappa: torch.Tensor,
-) -> torch.Tensor:
-    """
-    Compute swaption prices using the rough SABR analytic formula.
-
-    Combines rough_sabr_iv with Black pricing.
-
-    Args:
-        swn:      SwaptionData
-        v0, vbar, rho_eff, H, kappa: model parameters
-
-    Returns:
-        prices: shape (n_strikes,) — option prices
-    """
-    sigma = rough_sabr_iv(
-        swn.strikes, swn.S0, swn.expiry_years,
-        v0, vbar, rho_eff, H, kappa,
-    )
-    return black_price_torch(
-        swn.S0, swn.strikes, torch.tensor(swn.expiry_years, dtype=torch.float64),
-        sigma, swn.A0, swn.is_call,
-    )
 
 
 # =============================================================================
@@ -1279,7 +1557,7 @@ def rough_sabr_prices(
 # and v̄(T) is a known function of α (via v(0) and the variance curve).
 #
 # For the simplified case:
-#   v̄(T) = v(0) · G(H, κ, T)   where G = ∫₀¹ exp(κ²T^{2H}s^{2H}/(8H)) ds
+#   v̄(T) = v(0) · G(H, η, T)   where G = ∫₀¹ exp(η²T^{2H}s^{2H}/4) ds
 #   v(0) = wᵀ ρ w    with  w_j = π_j · α_j
 #
 # For a single-rate swaption (1Y tenor, J = I+1):
@@ -1292,7 +1570,7 @@ def match_alpha_atm(
     swn: "SwaptionData",
     mkt: "MarketData",
     H: torch.Tensor,
-    kappa: torch.Tensor,
+    eta: torch.Tensor,
     rho0: torch.Tensor,
     rho_matrix: torch.Tensor,
     alpha_other: torch.Tensor,
@@ -1306,16 +1584,16 @@ def match_alpha_atm(
     Find α_j for rate j such that model ATM IV = market ATM IV.
 
     For 1Y-tenor swaptions (J = I+1), this is a single rate, and we can
-    solve analytically via the rough SABR formula. For multi-rate swaptions,
-    we use Brent root-finding.
+    solve analytically via the ATM variance relationship. For multi-rate
+    swaptions, we use Brent root-finding.
 
     Args:
         swn:          SwaptionData
         mkt:          MarketData
-        H, kappa, rho0, rho_matrix: current model parameters
+        H, eta, rho0, rho_matrix: current model parameters
         alpha_other:  shape (N,) — current α values (used for other rates)
         variance_curve_mode: "simplified" or "full"
-        method:       "formula" (rough SABR) or "mc" (Monte Carlo)
+        method:       "formula" (ATM variance: σ_ATM = √v̄) or "mc" (Monte Carlo)
         N_paths, M:   MC settings (if method="mc")
         seed:         RNG seed (if method="mc")
 
@@ -1337,7 +1615,7 @@ def match_alpha_atm(
     pi = swn.pi
 
     if method == "formula":
-        # --- Rough SABR formula approach ---
+        # --- ATM variance approach ---
 
         if n_rates == 1:
             # Single rate: analytic solution
@@ -1346,7 +1624,7 @@ def match_alpha_atm(
             j_idx = I  # 0-indexed in alpha
             pi_j = pi[0]
 
-            # Compute G = ∫₀¹ exp(κ²T^{2H}s^{2H}/(8H)) ds via quadrature
+            # Compute G = ∫₀¹ exp(η²T^{2H}s^{2H}/4) ds via quadrature
             n_quad = 50
             nodes_np, weights_np = np.polynomial.legendre.leggauss(n_quad)
             s_np = 0.5 * (nodes_np + 1.0)
@@ -1358,12 +1636,12 @@ def match_alpha_atm(
             two_H = 2.0 * H
 
             if variance_curve_mode == "simplified":
-                G = (w * torch.exp(kappa**2 * (T * s)**two_H / (8.0 * H))).sum()
+                G = (w * torch.exp(eta**2 * (T * s)**two_H / 4.0)).sum()
             else:
                 # For full mode, G depends on alpha itself — need iterative solve
                 # Fall through to the general Brent case below
                 return _match_alpha_brent(
-                    swn, mkt, H, kappa, rho0, rho_matrix,
+                    swn, mkt, H, eta, rho0, rho_matrix,
                     alpha_other, sigma_atm_mkt, variance_curve_mode,
                     method="formula",
                 )
@@ -1374,7 +1652,7 @@ def match_alpha_atm(
         else:
             # Multi-rate: Brent root-finding
             return _match_alpha_brent(
-                swn, mkt, H, kappa, rho0, rho_matrix,
+                swn, mkt, H, eta, rho0, rho_matrix,
                 alpha_other, sigma_atm_mkt, variance_curve_mode,
                 method="formula",
             )
@@ -1382,14 +1660,14 @@ def match_alpha_atm(
     elif method == "mc":
         # MC-based ATM matching via Brent
         return _match_alpha_brent(
-            swn, mkt, H, kappa, rho0, rho_matrix,
+            swn, mkt, H, eta, rho0, rho_matrix,
             alpha_other, sigma_atm_mkt, variance_curve_mode,
             method="mc", N_paths=N_paths, M=M, seed=seed,
         )
 
 
 def _match_alpha_brent(
-    swn, mkt, H, kappa, rho0, rho_matrix,
+    swn, mkt, H, eta, rho0, rho_matrix,
     alpha_other, sigma_atm_mkt, variance_curve_mode,
     method="formula", N_paths=10000, M=50, seed=42,
 ):
@@ -1413,13 +1691,13 @@ def _match_alpha_brent(
         alpha_trial[I:J] = alpha_base * c
 
         if method == "formula":
-            # Compute v(0), v̄, then ATM IV via formula
+            # Compute v(0), v̄, then ATM IV via variance relationship
             w = pi * alpha_trial[I:J]
             rho_sub = rho_matrix[I:J, I:J].detach()
             v0_trial = (w @ rho_sub @ w).item()
 
             vbar_trial = compute_vbar(
-                T, torch.tensor(v0_trial), H.detach(), kappa.detach(),
+                T, torch.tensor(v0_trial), H.detach(), eta.detach(),
                 mode=variance_curve_mode,
                 swn=swn, mkt=mkt,
                 alpha=alpha_trial, rho0=rho0.detach(),
@@ -1445,12 +1723,12 @@ def _match_alpha_brent(
             h = T / M
             time_grid = torch.arange(1, M + 1, dtype=torch.float64) * h
             v_curve = compute_v_curve(
-                time_grid, swn, mkt, H=H.detach(), kappa=kappa.detach(),
+                time_grid, swn, mkt, H=H.detach(), eta=eta.detach(),
                 alpha=alpha_t, rho0=rho0.detach(), rho_matrix=rho_matrix.detach(),
                 v0=v0_t, mode=variance_curve_mode,
             )
             S_T = simulate_approx(
-                S0=swn.S0, v0=v0_t, kappa=kappa.detach(),
+                S0=swn.S0, v0=v0_t, eta=eta.detach(),
                 H=H.detach(), rho_eff=rho_eff_t,
                 T=T, M=M, N_paths=N_paths, v_curve=v_curve,
             )
@@ -1483,7 +1761,7 @@ def _match_alpha_brent(
 def match_all_alphas(
     mkt: "MarketData",
     H: torch.Tensor,
-    kappa: torch.Tensor,
+    eta: torch.Tensor,
     rho0: torch.Tensor,
     rho_matrix: torch.Tensor,
     alpha_init: torch.Tensor,
@@ -1499,7 +1777,7 @@ def match_all_alphas(
 
     Args:
         mkt:          MarketData
-        H, kappa, rho0, rho_matrix: current parameters
+        H, eta, rho0, rho_matrix: current parameters
         alpha_init:   shape (N,) — starting α values
         smile_keys:   list of (expiry, tenor) keys to match; default = all 1Y tenors
         variance_curve_mode: "simplified" or "full"
@@ -1521,7 +1799,7 @@ def match_all_alphas(
         I, J = swn.I, swn.J
 
         alpha_j = match_alpha_atm(
-            swn, mkt, H, kappa, rho0, rho_matrix, alpha,
+            swn, mkt, H, eta, rho0, rho_matrix, alpha,
             variance_curve_mode=variance_curve_mode,
             method=method,
         )
@@ -1684,6 +1962,8 @@ def compute_total_loss(
     cholesky_cache: Optional[dict] = None,
     seed: Optional[int] = None,
     swaption_keys: Optional[list] = None,
+    scheme: Optional[str] = None,
+    hybrid_kappa: int = 2,
 ) -> dict:
     """
     Layer 6: Compute the total calibration loss over all swaptions.
@@ -1701,11 +1981,14 @@ def compute_total_loss(
         N_paths:             MC paths per swaption
         M:                   time steps
         use_exact:           Cholesky vs approximate scheme
+                             (ignored if `scheme` is provided)
         variance_curve_mode: "full", "simplified", "constant"
         cholesky_cache:      reusable Cholesky factors
         seed:                if set, fix the RNG for common random numbers (CRN)
         swaption_keys:       if set, only compute loss for these (expiry, tenor) keys;
                              otherwise use all swaptions in mkt.swaptions
+        scheme:              "exact", "approx", or "hybrid"
+        hybrid_kappa:        near-field cells for hybrid scheme
 
     Returns:
         dict with:
@@ -1733,6 +2016,8 @@ def compute_total_loss(
             use_exact=use_exact,
             variance_curve_mode=variance_curve_mode,
             cholesky_cache=cholesky_cache,
+            scheme=scheme,
+            hybrid_kappa=hybrid_kappa,
         )
 
         # Layer 5: prices
@@ -1793,15 +2078,16 @@ def calibrate(
     crn_seed: int = 42,
     log_every: int = 20,
     swaption_keys: Optional[list] = None,
-    scheduler_type: str = "cosine",
-    scheduler_patience: int = 150,
+    scheduler_patience: int = 50,
     scheduler_factor: float = 0.5,
     min_lr: float = 1e-6,
+    scheme: Optional[str] = None,
+    hybrid_kappa: int = 2,
 ) -> dict:
     """
     Layer 7: Run the calibration loop.
 
-    Uses Adam optimizer with learning rate scheduling.
+    Uses Adam optimizer with optional learning rate scheduling.
     Supports common random numbers (CRN) for variance reduction.
 
     Args:
@@ -1812,39 +2098,33 @@ def calibrate(
         N_paths:             MC paths per swaption per iteration
         M:                   simulation time steps
         use_exact:           exact (Cholesky) vs approximate scheme
+                             (ignored if `scheme` is provided)
         variance_curve_mode: "full", "simplified", "constant"
         use_crn:             enable common random numbers
         crn_seed:            base seed for CRN
         log_every:           print progress every N steps
         swaption_keys:       subset of swaptions to calibrate on
-        scheduler_type:      "cosine" (CosineAnnealingLR, recommended) or
-                             "plateau" (ReduceLROnPlateau, noisy with MC).
-                             Cosine is preferred: deterministic decay, no
-                             dependence on noisy loss signals.
-        scheduler_patience:  [plateau only] steps without improvement before LR cut
-        scheduler_factor:    [plateau only] LR reduction factor
-        min_lr:              minimum learning rate (both schedulers)
+        scheduler_patience:  reduce LR after this many steps without improvement
+        scheduler_factor:    LR reduction factor
+        min_lr:              minimum learning rate
+        scheme:              "exact", "approx", or "hybrid"
+        hybrid_kappa:        near-field cells for hybrid scheme
 
     Returns:
         dict with:
             history:   list of dicts {step, loss, loss_iv, lr, params_snapshot}
             best:      dict of best parameters (lowest loss)
     """
+    # Resolve scheme for cache decision
+    effective_scheme = scheme if scheme is not None else ("exact" if use_exact else "approx")
+
     optimizer = torch.optim.Adam(params.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', patience=scheduler_patience,
+        factor=scheduler_factor, min_lr=min_lr,
+    )
 
-    if scheduler_type == "cosine":
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=n_iterations, eta_min=min_lr,
-        )
-    elif scheduler_type == "plateau":
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', patience=scheduler_patience,
-            factor=scheduler_factor, min_lr=min_lr,
-        )
-    else:
-        raise ValueError(f"Unknown scheduler_type: {scheduler_type}")
-
-    cholesky_cache = {} if use_exact else None
+    cholesky_cache = {} if effective_scheme == "exact" else None
     history = []
     best_loss = float('inf')
     best_state = None
@@ -1862,6 +2142,8 @@ def calibrate(
             cholesky_cache=cholesky_cache,
             seed=seed,
             swaption_keys=swaption_keys,
+            scheme=scheme,
+            hybrid_kappa=hybrid_kappa,
         )
 
         loss = result["loss"]
@@ -1871,12 +2153,7 @@ def calibrate(
         torch.nn.utils.clip_grad_norm_(params.parameters(), max_norm=10.0)
 
         optimizer.step()
-
-        # Step the scheduler
-        if scheduler_type == "cosine":
-            scheduler.step()
-        else:
-            scheduler.step(loss.item())
+        scheduler.step(loss.item())
 
         current_lr = optimizer.param_groups[0]['lr']
 
@@ -1897,17 +2174,17 @@ def calibrate(
             with torch.no_grad():
                 p = params()
                 H_val = p["H"].item()
-                kappa_val = p["kappa"].item()
+                eta_val = p["eta"].item()
             n_swn = len(swaption_keys) if swaption_keys else len(mkt.swaptions)
             rmse_iv = np.sqrt(result["loss_iv"] / max(1, n_swn)) * 100
             print(f"  [{step:4d}/{n_iterations}]  "
                   f"loss={loss.item():.6f}  "
                   f"RMSE_IV={rmse_iv:.3f}%  "
-                  f"H={H_val:.4f}  κ={kappa_val:.4f}  "
+                  f"H={H_val:.4f}  η={eta_val:.4f}  "
                   f"lr={current_lr:.2e}")
 
         # Rebuild Cholesky cache if H changed and using exact scheme
-        if use_exact and step > 0 and step % 50 == 0:
+        if effective_scheme == "exact" and step > 0 and step % 50 == 0:
             cholesky_cache.clear()
 
     return {
@@ -1926,8 +2203,6 @@ def calibrate_two_stage(
     stage1_N_paths: int = 5000,
     stage1_M: int = 30,
     stage1_keys: Optional[list] = None,
-    stage1_scheduler: str = "cosine",
-    stage1_min_lr: float = 1e-5,
     # Stage 2 settings
     stage2_iterations: int = 200,
     stage2_lr: float = 1e-3,
@@ -1935,53 +2210,34 @@ def calibrate_two_stage(
     stage2_M: int = 50,
     stage2_variance_mode: str = "full",
     stage2_keys: Optional[list] = None,
-    stage2_scheduler: str = "cosine",
-    stage2_min_lr: float = 1e-5,
     # Common
     use_crn: bool = True,
     crn_seed: int = 42,
     log_every: int = 20,
 ) -> dict:
     """
-    Two-stage AMCC calibration following Gonon et al. (2025), adapted for the
-    Mapped Rough SABR FMM of Adachi et al. (2025).
+    Two-stage calibration following Adachi et al.
 
-    The two stages differ only in how fBm is sampled:
+    Stage 1: Approximate scheme (H differentiable).
+        - Fewer paths, more iterations, simplified variance curve
+        - Optimizes ALL parameters including H
+        - Use 1Y-tenor smiles as in the paper's first step
 
-      Stage 1 — Approximate kernel discretization (§4.1 of Gonon).
-        W̃^H_{t_{i+1}} ≈ Σ_{k=0}^{i} ((i+1-k)h)^{H-1/2} ΔW⁰_k
-        Pros:  H lives inside the computational graph → backprop through H.
-        Cons:  O(M²) per path, discretization bias.
-        Use:   Explore H landscape with "simplified" variance curve.
-
-      Stage 2 — Exact Cholesky sampling (§4.2 of Gonon).
-        Joint (W̃^H, W⁰) drawn from precomputed 2M×2M covariance.
-        Pros:  Unbiased fBm, O(M) per path after setup.
-        Cons:  H frozen (Cholesky computed outside the graph).
-        Use:   Refine α, ρ₀, Σ with "full" variance curve.
-
-    Learning rate schedule:
-      Default is CosineAnnealingLR, which decays lr smoothly from the initial
-      value to min_lr over the full iteration budget. Unlike ReduceLROnPlateau,
-      it does not depend on noisy MC loss signals and won't kill the lr prematurely.
+    Stage 2: Exact Cholesky scheme (H fixed).
+        - More paths, fewer iterations, full variance curve
+        - H frozen at Stage 1 value
+        - Calibrate α, ρ₀, ρ for precise fit
 
     Args:
         params:  MappedRoughSABRParams (modified in place)
         mkt:     MarketData
         stage1/stage2 settings: see calibrate() for details
-        stage1_scheduler, stage2_scheduler: "cosine" or "plateau"
-        stage1_min_lr, stage2_min_lr: minimum learning rate for each stage
 
     Returns:
-        dict with stage1_result, stage2_result, and H_calibrated
+        dict with stage1_result, stage2_result, and final params
     """
-    # ================================================================
-    # STAGE 1: Approximate scheme — H differentiable
-    # ================================================================
     print("=" * 60)
     print("STAGE 1: Approximate scheme (H differentiable)")
-    print(f"  {stage1_iterations} iters × {stage1_N_paths:,} paths × {stage1_M} steps")
-    print(f"  lr={stage1_lr:.1e} → {stage1_min_lr:.1e}  ({stage1_scheduler})")
     print("=" * 60)
 
     params.unfix_H()
@@ -1993,8 +2249,6 @@ def calibrate_two_stage(
         use_crn=use_crn, crn_seed=crn_seed,
         log_every=log_every,
         swaption_keys=stage1_keys,
-        scheduler_type=stage1_scheduler,
-        min_lr=stage1_min_lr,
     )
 
     # Load best Stage 1 parameters
@@ -2005,13 +2259,8 @@ def calibrate_two_stage(
         H_calibrated = params.get_H().item()
     print(f"\nStage 1 complete. H = {H_calibrated:.4f}")
 
-    # ================================================================
-    # STAGE 2: Exact Cholesky scheme — H frozen
-    # ================================================================
     print("\n" + "=" * 60)
     print(f"STAGE 2: Exact Cholesky scheme (H fixed at {H_calibrated:.4f})")
-    print(f"  {stage2_iterations} iters × {stage2_N_paths:,} paths × {stage2_M} steps")
-    print(f"  lr={stage2_lr:.1e} → {stage2_min_lr:.1e}  ({stage2_scheduler})")
     print("=" * 60)
 
     params.fix_H()
@@ -2023,8 +2272,6 @@ def calibrate_two_stage(
         use_crn=use_crn, crn_seed=crn_seed + 10000,
         log_every=log_every,
         swaption_keys=stage2_keys,
-        scheduler_type=stage2_scheduler,
-        min_lr=stage2_min_lr,
     )
 
     # Load best Stage 2 parameters
@@ -2109,7 +2356,6 @@ def compute_model_smile(
     params: "MappedRoughSABRParams",
     swn: "SwaptionData",
     mkt: "MarketData",
-    method: str = "mc",
     variance_curve_mode: str = "simplified",
     N_paths: int = 50000,
     M: int = 100,
@@ -2117,13 +2363,12 @@ def compute_model_smile(
     cholesky_cache: Optional[dict] = None,
 ) -> dict:
     """
-    Compute the full model smile for a single swaption.
+    Compute the full model smile for a single swaption via Monte Carlo.
 
     Args:
         params:  calibrated MappedRoughSABRParams
         swn:     SwaptionData
         mkt:     MarketData
-        method:  "mc" (Monte Carlo) or "formula" (rough SABR analytic)
         variance_curve_mode, N_paths, M, seed: simulation settings
 
     Returns:
@@ -2132,33 +2377,16 @@ def compute_model_smile(
     p = params()
     eff = compute_effective_params(p["alpha"], p["rho0"], p["rho"], swn)
 
-    if method == "mc":
-        torch.manual_seed(seed)
-        S_T = simulate_swaption(
-            params, swn, mkt,
-            N_paths=N_paths, M=M,
-            use_exact=True,
-            variance_curve_mode=variance_curve_mode,
-            cholesky_cache=cholesky_cache,
-        )
-        mc_prices = compute_swaption_prices(S_T, swn)
-        model_ivs = mc_prices_to_black_iv(mc_prices.detach(), swn)
-    else:
-        vbar = compute_vbar(
-            swn.expiry_years, eff["v0"], p["H"], p["kappa"],
-            mode=variance_curve_mode,
-            swn=swn, mkt=mkt,
-            alpha=p["alpha"], rho0=p["rho0"], rho_matrix=p["rho"],
-        )
-        model_ivs = rough_sabr_iv(
-            swn.strikes, swn.S0, swn.expiry_years,
-            eff["v0"], vbar, eff["rho_eff"], p["H"], p["kappa"],
-        )
-        mc_prices = black_price_torch(
-            swn.S0, swn.strikes,
-            torch.tensor(swn.expiry_years, dtype=torch.float64),
-            model_ivs, swn.A0, swn.is_call,
-        )
+    torch.manual_seed(seed)
+    S_T = simulate_swaption(
+        params, swn, mkt,
+        N_paths=N_paths, M=M,
+        use_exact=True,
+        variance_curve_mode=variance_curve_mode,
+        cholesky_cache=cholesky_cache,
+    )
+    mc_prices = compute_swaption_prices(S_T, swn)
+    model_ivs = mc_prices_to_black_iv(mc_prices.detach(), swn)
 
     market_ivs = swn.ivs_black
     iv_errors = model_ivs - market_ivs
@@ -2177,7 +2405,6 @@ def compute_model_smile(
 def print_calibration_report(
     params: "MappedRoughSABRParams",
     mkt: "MarketData",
-    method: str = "mc",
     variance_curve_mode: str = "simplified",
     N_paths: int = 50000,
     M: int = 100,
@@ -2187,10 +2414,11 @@ def print_calibration_report(
     """
     Print a comprehensive calibration report with per-swaption RMSE.
 
+    All smile computation is done via Monte Carlo.
+
     Args:
         params:  calibrated model
         mkt:     market data
-        method:  "mc" or "formula"
         ...      simulation settings
 
     Returns:
@@ -2207,8 +2435,8 @@ def print_calibration_report(
 
     with torch.no_grad():
         p = params()
-        print(f"H = {p['H'].item():.4f},  κ = {p['kappa'].item():.4f}")
-        print(f"Method: {method},  variance curve: {variance_curve_mode}")
+        print(f"H = {p['H'].item():.4f},  η = {p['eta'].item():.4f}")
+        print(f"MC: {N_paths} paths, {M} steps,  variance curve: {variance_curve_mode}")
         print()
 
     print(f"{'Swaption':>10s}  {'RMSE(bp)':>10s}  {'MaxErr(bp)':>10s}  "
@@ -2222,7 +2450,6 @@ def print_calibration_report(
 
         res = compute_model_smile(
             params, swn, mkt,
-            method=method,
             variance_curve_mode=variance_curve_mode,
             N_paths=N_paths, M=M, seed=seed,
             cholesky_cache=cholesky_cache,
@@ -2264,7 +2491,6 @@ def print_smile_comparison(
     params: "MappedRoughSABRParams",
     swn: "SwaptionData",
     mkt: "MarketData",
-    method: str = "mc",
     variance_curve_mode: str = "simplified",
     N_paths: int = 50000,
     M: int = 100,
@@ -2272,11 +2498,10 @@ def print_smile_comparison(
     cholesky_cache: Optional[dict] = None,
 ):
     """
-    Print a detailed smile comparison for one swaption.
+    Print a detailed smile comparison for one swaption (MC-based).
     """
     res = compute_model_smile(
         params, swn, mkt,
-        method=method,
         variance_curve_mode=variance_curve_mode,
         N_paths=N_paths, M=M, seed=seed,
         cholesky_cache=cholesky_cache,
@@ -2304,7 +2529,6 @@ def print_smile_comparison(
 def generate_smile_plot_data(
     params: "MappedRoughSABRParams",
     mkt: "MarketData",
-    method: str = "mc",
     variance_curve_mode: str = "simplified",
     N_paths: int = 50000,
     M: int = 100,
@@ -2312,7 +2536,7 @@ def generate_smile_plot_data(
     swaption_keys: Optional[list] = None,
 ) -> dict:
     """
-    Generate data for smile plots (model vs market).
+    Generate data for smile plots (model vs market, MC-based).
 
     Returns a dict of {key: {strikes, market_ivs, model_ivs, errors}}
     suitable for matplotlib plotting.
@@ -2327,7 +2551,6 @@ def generate_smile_plot_data(
         swn = mkt.swaptions[key]
         res = compute_model_smile(
             params, swn, mkt,
-            method=method,
             variance_curve_mode=variance_curve_mode,
             N_paths=N_paths, M=M, seed=seed,
             cholesky_cache=cholesky_cache,
@@ -2355,7 +2578,7 @@ if __name__ == "__main__":
     mkt = load_market_data(
         "usd_swaption_data.pkl",
         subset="joint_all_smiles",
-        convert_otm_from_bachelier=True,
+        date="2024-12-09",
         device="cpu",
     )
     print_market_summary(mkt)
@@ -2365,42 +2588,17 @@ if __name__ == "__main__":
     params = MappedRoughSABRParams(N=mkt.N, device=mkt.device)
     p = params()
 
-    # --- Rough SABR formula test ---
-    print("\n" + "=" * 60)
-    print("Layer 5b: Rough SABR analytic formula test")
-    print("=" * 60)
-
-    test_key = next(iter(mkt.swaptions))
-    swn = mkt.swaptions[test_key]
-    eff = compute_effective_params(p["alpha"], p["rho0"], p["rho"], swn)
-    vbar = compute_vbar(
-        swn.expiry_years, eff["v0"], p["H"], p["kappa"],
-        mode="simplified",
-    )
-    model_ivs_formula = rough_sabr_iv(
-        swn.strikes, swn.S0, swn.expiry_years,
-        eff["v0"], vbar, eff["rho_eff"], p["H"], p["kappa"],
-    )
-    print(f"  {test_key[0]:.0f}Y×{test_key[1]:.0f}Y:")
-    print(f"  v(0) = {eff['v0'].item():.6f}, v̄(T) = {vbar.item():.6f}")
-    print(f"  ATM formula IV = {torch.sqrt(vbar).item()*100:.2f}%")
-    print(f"  Market ATM IV  = {swn.ivs_black[(swn.strikes - swn.S0).abs() < 1e-10][0].item()*100:.2f}%")
-    print(f"  Formula skew (ψ):")
-    psi = (p["kappa"] * eff["rho_eff"]
-           / ((2*p["H"]+1) * (p["H"]+1.5) * torch.sqrt(eff["v0"]+1e-30)))
-    print(f"    ψ = {psi.item():.4f}")
-
     # --- α ATM matching test ---
     print("\n" + "=" * 60)
-    print("α ATM matching test")
+    print("α ATM matching test (σ_ATM = √v̄(T))")
     print("=" * 60)
 
     alpha_before = p["alpha"].detach().clone()
     alpha_matched = match_all_alphas(
-        mkt, p["H"], p["kappa"], p["rho0"], p["rho"],
+        mkt, p["H"], p["eta"], p["rho0"], p["rho"],
         alpha_init=p["alpha"],
         variance_curve_mode="simplified",
-        method="formula",
+        method="formula",    # "formula" here = ATM variance relationship, not skew formula
     )
 
     print(f"  {'Rate':>6s}  {'α_init':>10s}  {'α_matched':>10s}  {'Ratio':>8s}")
@@ -2413,13 +2611,13 @@ if __name__ == "__main__":
               f"{alpha_matched[j].item():10.4f}  "
               f"{alpha_matched[j].item()/alpha_before[j].item():8.3f}")
 
-    # Verify: after matching, ATM should fit
-    print("\n  Verification (formula ATM IV vs market):")
+    # Verify: after matching, ATM should fit (using variance relationship)
+    print("\n  Verification (ATM variance check: σ_ATM = √v̄ vs market):")
     for key in one_y_keys[:3]:
         swn = mkt.swaptions[key]
         eff2 = compute_effective_params(alpha_matched, p["rho0"], p["rho"], swn)
         vbar2 = compute_vbar(
-            swn.expiry_years, eff2["v0"], p["H"], p["kappa"],
+            swn.expiry_years, eff2["v0"], p["H"], p["eta"],
             mode="simplified",
         )
         atm_iv_model = torch.sqrt(vbar2).item() * 100
@@ -2450,6 +2648,29 @@ if __name__ == "__main__":
         else:
             print(f"  {name:20s}: grad = None  ✗")
 
+    # --- Hybrid scheme gradient flow test ---
+    print("\n" + "=" * 60)
+    print("Gradient flow: Layers 0→6 (BLP hybrid scheme, κ=2)")
+    print("=" * 60)
+
+    params.zero_grad()
+    result_hybrid = compute_total_loss(
+        params, mkt,
+        N_paths=500, M=10,
+        scheme="hybrid", hybrid_kappa=2,
+        variance_curve_mode="simplified",
+        seed=123, swaption_keys=list(mkt.swaptions.keys())[:3],
+    )
+    result_hybrid["loss"].backward()
+
+    print(f"Loss = {result_hybrid['loss'].item():.6f}")
+    for name, param in params.named_parameters():
+        if param.grad is not None:
+            gn = param.grad.norm().item()
+            print(f"  {name:20s}: |grad| = {gn:.6e}  {'✓' if gn > 0 else '✗'}")
+        else:
+            print(f"  {name:20s}: grad = None  ✗")
+
     # --- Mini calibration demo ---
     print("\n" + "=" * 60)
     print("Layer 7: Mini calibration (5 steps, for testing)")
@@ -2471,15 +2692,15 @@ if __name__ == "__main__":
         swaption_keys=test_keys,
     )
 
-    # --- Diagnostics demo ---
+    # --- Post-calibration diagnostics (MC-based) ---
     print("\n" + "=" * 60)
-    print("Post-calibration diagnostics (formula-based, quick)")
+    print("Post-calibration diagnostics (MC)")
     print("=" * 60)
 
     print_calibration_report(
         params, mkt,
-        method="formula",
         variance_curve_mode="simplified",
+        N_paths=5000, M=50,
         swaption_keys=test_keys,
     )
 
@@ -2487,8 +2708,8 @@ if __name__ == "__main__":
         swn = mkt.swaptions[test_keys[0]]
         print_smile_comparison(
             params, swn, mkt,
-            method="formula",
             variance_curve_mode="simplified",
+            N_paths=5000, M=50,
         )
 
     print("\nDone.")

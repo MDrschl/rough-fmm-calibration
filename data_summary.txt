@@ -1,6 +1,10 @@
-USD SOFR Swaption Data Summary
-Valuation date: 2024-12-09
-T_N = 11 (annual grid)
+USD SOFR Swaption Data Summary (multi-date)
+T_N = 11, theta = 1.0
+All IVs are Bachelier (normal) vol, stored in decimal
+
+============================================================
+Date: 2024-12-09
+============================================================
 
 Discount factors:
   P(T_0) = 1.00000000
@@ -31,535 +35,1158 @@ Forward term rates:
 
 Swaptions (55 total):
 
-  --- 1Y x 1Y ---
-  I=1, J=2
-  S0 = 3.7287%
-  A0 = 0.925761
-  Pi_sum = 1.000000
-  Strikes: [1.72874099 2.72874099 3.22874099 3.47874099 3.72874099 3.97874099
- 4.22874099 4.72874099 5.72874099]
-  IVs (%): [136.12 121.85 117.23 115.39  30.86 112.59 111.59 110.3  109.71]
-  Prices: [0.00506367 0.00944039 0.01202272 0.01341303 0.00423298 0.0140826
- 0.01335968 0.01210276 0.01020695]
+  1Y x 1Y (I=1, J=2): S0=3.7287%, 9 strikes
+    ATM normal vol = 114.43 bps, Black vol = 30.81%
 
-  --- 1Y x 2Y ---
-  I=1, J=3
-  S0 = 3.6837%
-  A0 = 1.819034
-  Pi_sum = 1.000219
-  Strikes: [1.68365795 2.68365795 3.18365795 3.43365795 3.68365795 3.93365795
- 4.18365795 4.68365795 5.68365795]
-  IVs (%): [132.22 118.17 113.78 112.1   30.11 109.68 108.9  108.05 108.1 ]
-  Prices: [0.00911535 0.01750775 0.02254342 0.02527743 0.00801868 0.02663409
- 0.02525159 0.02287427 0.01931127]
+  1Y x 2Y (I=1, J=3): S0=3.6837%, 9 strikes
+    ATM normal vol = 111.05 bps, Black vol = 30.26%
 
-  --- 1Y x 3Y ---
-  I=1, J=4
-  S0 = 3.6497%
-  A0 = 2.681449
-  Pi_sum = 1.000481
-  Strikes: [1.64968549 2.64968549 3.14968549 3.39968549 3.64968549 3.89968549
- 4.14968549 4.64968549 5.64968549]
-  IVs (%): [126.75 113.62 109.78 108.4   29.47 106.6  106.12 105.77 106.44]
-  Prices: [0.01208837 0.02418374 0.03161183 0.03568009 0.01146426 0.03781067
- 0.03585431 0.03250417 0.02747615]
+  1Y x 3Y (I=1, J=4): S0=3.6497%, 9 strikes
+    ATM normal vol = 107.68 bps, Black vol = 29.61%
 
-  --- 1Y x 4Y ---
-  I=1, J=5
-  S0 = 3.6329%
-  A0 = 3.514068
-  Pi_sum = 1.000616
-  Strikes: [3.63285014]
-  IVs (%): [29.22]
-  Prices: [0.01482877]
+  1Y x 4Y (I=1, J=5): S0=3.6329%, 1 strikes
+    ATM normal vol = 106.19 bps, Black vol = 29.34%
 
-  --- 1Y x 5Y ---
-  I=1, J=6
-  S0 = 3.6309%
-  A0 = 4.317580
-  Pi_sum = 1.000540
-  Strikes: [1.63091849 2.63091849 3.13091849 3.38091849 3.63091849 3.88091849
- 4.13091849 4.63091849 5.63091849]
-  IVs (%): [122.56 110.14 106.55 105.26  28.8  103.57 103.11 102.73 103.24]
-  Prices: [0.01796458 0.03708373 0.04895976 0.05547819 0.01794984 0.05885
- 0.05566809 0.05019421 0.0419469 ]
+  1Y x 5Y (I=1, J=6): S0=3.6309%, 9 strikes
+    ATM normal vol = 104.52 bps, Black vol = 28.89%
 
-  --- 1Y x 6Y ---
-  I=1, J=7
-  S0 = 3.6340%
-  A0 = 5.092790
-  Pi_sum = 1.000381
-  Strikes: [3.63396241]
-  IVs (%): [28.29]
-  Prices: [0.02081771]
+  1Y x 6Y (I=1, J=7): S0=3.6340%, 1 strikes
+    ATM normal vol = 102.73 bps, Black vol = 28.36%
 
-  --- 1Y x 7Y ---
-  I=1, J=8
-  S0 = 3.6406%
-  A0 = 5.840443
-  Pi_sum = 1.000131
-  Strikes: [1.64060669 2.64060669 3.14060669 3.39060669 3.64060669 3.89060669
- 4.14060669 4.64060669 5.64060669]
-  IVs (%): [118.18 106.35 103.   101.83  27.79 100.38 100.01  99.81 100.54]
-  Prices: [0.02284564 0.04812819 0.06404194 0.07282276 0.02349754 0.07737931
- 0.07307873 0.06572444 0.05466454]
+  1Y x 7Y (I=1, J=8): S0=3.6406%, 9 strikes
+    ATM normal vol = 101.10 bps, Black vol = 27.86%
 
-  --- 1Y x 8Y ---
-  I=1, J=9
-  S0 = 3.6508%
-  A0 = 6.561186
-  Pi_sum = 0.999752
-  Strikes: [3.65081754]
-  IVs (%): [27.35]
-  Prices: [0.02605481]
+  1Y x 8Y (I=1, J=9): S0=3.6508%, 1 strikes
+    ATM normal vol = 99.74 bps, Black vol = 27.41%
 
-  --- 1Y x 9Y ---
-  I=1, J=10
-  S0 = 3.6631%
-  A0 = 7.255683
-  Pi_sum = 0.999272
-  Strikes: [3.66309149]
-  IVs (%): [26.97]
-  Prices: [0.02851034]
+  1Y x 9Y (I=1, J=10): S0=3.6631%, 1 strikes
+    ATM normal vol = 98.68 bps, Black vol = 27.02%
 
-  --- 1Y x 10Y ---
-  I=1, J=11
-  S0 = 3.6780%
-  A0 = 7.924497
-  Pi_sum = 0.998637
-  Strikes: [1.67804631 2.67804631 3.17804631 3.42804631 3.67804631 3.92804631
- 4.17804631 4.67804631 5.67804631]
-  IVs (%): [114.02 102.69  99.52  98.43  26.62  97.16  96.88  96.84  97.79]
-  Prices: [0.02988387 0.06343032 0.08477602 0.09660201 0.03086215 0.10271098
- 0.09687547 0.08693131 0.07202559]
+  1Y x 10Y (I=1, J=11): S0=3.6780%, 9 strikes
+    ATM normal vol = 97.84 bps, Black vol = 26.68%
 
-  --- 2Y x 1Y ---
-  I=2, J=3
-  S0 = 3.6369%
-  A0 = 0.893273
-  Pi_sum = 1.000000
-  Strikes: [3.63693527]
-  IVs (%): [30.57]
-  Prices: [0.00555992]
+  2Y x 1Y (I=2, J=3): S0=3.6369%, 1 strikes
+    ATM normal vol = 110.10 bps, Black vol = 30.51%
 
-  --- 2Y x 2Y ---
-  I=2, J=4
-  S0 = 3.6080%
-  A0 = 1.755688
-  Pi_sum = 1.000141
-  Strikes: [3.60800015]
-  IVs (%): [29.87]
-  Prices: [0.01059631]
+  2Y x 2Y (I=2, J=4): S0=3.6080%, 1 strikes
+    ATM normal vol = 107.42 bps, Black vol = 30.00%
 
-  --- 2Y x 3Y ---
-  I=2, J=5
-  S0 = 3.5986%
-  A0 = 2.588308
-  Pi_sum = 1.000189
-  Strikes: [3.59855283]
-  IVs (%): [29.25]
-  Prices: [0.01526185]
+  2Y x 3Y (I=2, J=5): S0=3.5986%, 1 strikes
+    ATM normal vol = 104.85 bps, Black vol = 29.35%
 
-  --- 2Y x 4Y ---
-  I=2, J=6
-  S0 = 3.6042%
-  A0 = 3.391820
-  Pi_sum = 1.000059
-  Strikes: [3.60421889]
-  IVs (%): [28.94]
-  Prices: [0.01982188]
+  2Y x 4Y (I=2, J=6): S0=3.6042%, 1 strikes
+    ATM normal vol = 103.84 bps, Black vol = 29.01%
 
-  --- 2Y x 5Y ---
-  I=2, J=7
-  S0 = 3.6129%
-  A0 = 4.167030
-  Pi_sum = 0.999874
-  Strikes: [3.6129061]
-  IVs (%): [28.38]
-  Prices: [0.02394493]
+  2Y x 5Y (I=2, J=7): S0=3.6129%, 1 strikes
+    ATM normal vol = 102.05 bps, Black vol = 28.44%
 
-  --- 2Y x 6Y ---
-  I=2, J=8
-  S0 = 3.6240%
-  A0 = 4.914682
-  Pi_sum = 0.999614
-  Strikes: [3.62400515]
-  IVs (%): [27.86]
-  Prices: [0.02781561]
+  2Y x 6Y (I=2, J=8): S0=3.6240%, 1 strikes
+    ATM normal vol = 100.53 bps, Black vol = 27.92%
 
-  --- 2Y x 7Y ---
-  I=2, J=9
-  S0 = 3.6380%
-  A0 = 5.635425
-  Pi_sum = 0.999236
-  Strikes: [3.63801664]
-  IVs (%): [27.4]
-  Prices: [0.03149609]
+  2Y x 7Y (I=2, J=9): S0=3.6380%, 1 strikes
+    ATM normal vol = 99.23 bps, Black vol = 27.45%
 
-  --- 2Y x 8Y ---
-  I=2, J=10
-  S0 = 3.6535%
-  A0 = 6.329923
-  Pi_sum = 0.998766
-  Strikes: [3.65349015]
-  IVs (%): [27.04]
-  Prices: [0.03506698]
+  2Y x 8Y (I=2, J=10): S0=3.6535%, 1 strikes
+    ATM normal vol = 98.33 bps, Black vol = 27.08%
 
-  --- 2Y x 9Y ---
-  I=2, J=11
-  S0 = 3.6713%
-  A0 = 6.998736
-  Pi_sum = 0.998149
-  Strikes: [3.67134065]
-  IVs (%): [26.65]
-  Prices: [0.03840628]
+  2Y x 9Y (I=2, J=11): S0=3.6713%, 1 strikes
+    ATM normal vol = 97.42 bps, Black vol = 26.69%
 
-  --- 3Y x 1Y ---
-  I=3, J=4
-  S0 = 3.5780%
-  A0 = 0.862415
-  Pi_sum = 1.000000
-  Strikes: [1.57802972 2.57802972 3.07802972 3.32802972 3.57802972 3.82802972
- 4.07802972 4.57802972 5.57802972]
-  IVs (%): [118.95 110.02 107.62 106.74  30.1  105.48 105.05 104.46 104.04]
-  Prices: [0.00765664 0.01337661 0.01650673 0.01813237 0.00634602 0.01933961
- 0.0189161  0.01815291 0.01690455]
+  3Y x 1Y (I=3, J=4): S0=3.5780%, 9 strikes
+    ATM normal vol = 106.01 bps, Black vol = 29.96%
 
-  --- 3Y x 2Y ---
-  I=3, J=5
-  S0 = 3.5783%
-  A0 = 1.695035
-  Pi_sum = 0.999999
-  Strikes: [1.57832551 2.57832551 3.07832551 3.32832551 3.57832551 3.82832551
- 4.07832551 4.57832551 5.57832551]
-  IVs (%): [119.23 108.85 105.97 104.91  29.32 103.41 102.9  102.26 101.94]
-  Prices: [0.01509438 0.02603263 0.03202957 0.03515585 0.01215756 0.03741859
- 0.03654216 0.03498971 0.0325124 ]
+  3Y x 2Y (I=3, J=5): S0=3.5783%, 9 strikes
+    ATM normal vol = 104.04 bps, Black vol = 29.39%
 
-  --- 3Y x 3Y ---
-  I=3, J=6
-  S0 = 3.5925%
-  A0 = 2.498547
-  Pi_sum = 0.999858
-  Strikes: [1.59252223 2.59252223 3.09252223 3.34252223 3.59252223 3.84252223
- 4.09252223 4.59252223 5.59252223]
-  IVs (%): [116.26 106.72 104.13 103.2   28.76 101.89 101.46 100.93 100.71]
-  Prices: [0.02181085 0.03788766 0.04674207 0.0513656  0.01765529 0.05472334
- 0.05344387 0.05116875 0.04751273]
+  3Y x 3Y (I=3, J=6): S0=3.5925%, 9 strikes
+    ATM normal vol = 102.42 bps, Black vol = 28.81%
 
-  --- 3Y x 4Y ---
-  I=3, J=7
-  S0 = 3.6063%
-  A0 = 3.273757
-  Pi_sum = 0.999685
-  Strikes: [3.60634953]
-  IVs (%): [28.34]
-  Prices: [0.02288981]
+  3Y x 4Y (I=3, J=7): S0=3.6063%, 1 strikes
+    ATM normal vol = 101.31 bps, Black vol = 28.38%
 
-  --- 3Y x 5Y ---
-  I=3, J=8
-  S0 = 3.6211%
-  A0 = 4.021409
-  Pi_sum = 0.999447
-  Strikes: [1.62113299 2.62113299 3.12113299 3.37113299 3.62113299 3.87113299
- 4.12113299 4.62113299 5.62113299]
-  IVs (%): [112.26 103.68 101.43 100.64  27.85  99.58  99.25  98.88  98.86]
-  Prices: [0.03433029 0.06002167 0.0742662  0.08171346 0.02775392 0.0871515
- 0.08510859 0.08147483 0.07561843]
+  3Y x 5Y (I=3, J=8): S0=3.6211%, 9 strikes
+    ATM normal vol = 100.01 bps, Black vol = 27.89%
 
-  --- 3Y x 6Y ---
-  I=3, J=9
-  S0 = 3.6382%
-  A0 = 4.742152
-  Pi_sum = 0.999099
-  Strikes: [3.63822034]
-  IVs (%): [27.4]
-  Prices: [0.03236126]
+  3Y x 6Y (I=3, J=9): S0=3.6382%, 1 strikes
+    ATM normal vol = 98.85 bps, Black vol = 27.43%
 
-  --- 3Y x 7Y ---
-  I=3, J=10
-  S0 = 3.6562%
-  A0 = 5.436650
-  Pi_sum = 0.998665
-  Strikes: [1.65621021 2.65621021 3.15621021 3.40621021 3.65621021 3.90621021
- 4.15621021 4.65621021 5.65621021]
-  IVs (%): [109.22 101.14  99.04  98.31  26.94  97.34  97.05  96.74  96.78]
-  Prices: [0.0459832  0.08035887 0.0994971  0.10951609 0.03666951 0.11677877
- 0.11398269 0.10900517 0.10095997]
+  3Y x 7Y (I=3, J=10): S0=3.6562%, 9 strikes
+    ATM normal vol = 97.70 bps, Black vol = 26.96%
 
-  --- 3Y x 8Y ---
-  I=3, J=11
-  S0 = 3.6764%
-  A0 = 6.105463
-  Pi_sum = 0.998088
-  Strikes: [3.6763744]
-  IVs (%): [26.54]
-  Prices: [0.0408037]
+  3Y x 8Y (I=3, J=11): S0=3.6764%, 1 strikes
+    ATM normal vol = 96.84 bps, Black vol = 26.57%
 
-  --- 4Y x 1Y ---
-  I=4, J=5
-  S0 = 3.5786%
-  A0 = 0.832619
-  Pi_sum = 1.000000
-  Strikes: [3.57863189]
-  IVs (%): [29.48]
-  Prices: [0.00690839]
+  4Y x 1Y (I=4, J=5): S0=3.5786%, 1 strikes
+    ATM normal vol = 103.37 bps, Black vol = 29.30%
 
-  --- 4Y x 2Y ---
-  I=4, J=6
-  S0 = 3.6002%
-  A0 = 1.636131
-  Pi_sum = 0.999894
-  Strikes: [3.60016133]
-  IVs (%): [28.53]
-  Prices: [0.01322885]
+  4Y x 2Y (I=4, J=6): S0=3.6002%, 1 strikes
+    ATM normal vol = 101.41 bps, Black vol = 28.55%
 
-  --- 4Y x 3Y ---
-  I=4, J=7
-  S0 = 3.6165%
-  A0 = 2.411341
-  Pi_sum = 0.999766
-  Strikes: [3.6164781]
-  IVs (%): [28.]
-  Prices: [0.0192308]
+  4Y x 3Y (I=4, J=7): S0=3.6165%, 1 strikes
+    ATM normal vol = 99.99 bps, Black vol = 28.01%
 
-  --- 4Y x 4Y ---
-  I=4, J=8
-  S0 = 3.6329%
-  A0 = 3.158993
-  Pi_sum = 0.999575
-  Strikes: [3.63290032]
-  IVs (%): [27.57]
-  Prices: [0.02492901]
+  4Y x 4Y (I=4, J=8): S0=3.6329%, 1 strikes
+    ATM normal vol = 98.98 bps, Black vol = 27.59%
 
-  --- 4Y x 5Y ---
-  I=4, J=9
-  S0 = 3.6516%
-  A0 = 3.879736
-  Pi_sum = 0.999278
-  Strikes: [3.65159994]
-  IVs (%): [27.16]
-  Prices: [0.03032788]
+  4Y x 5Y (I=4, J=9): S0=3.6516%, 1 strikes
+    ATM normal vol = 98.00 bps, Black vol = 27.17%
 
-  --- 4Y x 6Y ---
-  I=4, J=10
-  S0 = 3.6710%
-  A0 = 4.574234
-  Pi_sum = 0.998899
-  Strikes: [3.67095018]
-  IVs (%): [26.76]
-  Prices: [0.03542945]
+  4Y x 6Y (I=4, J=10): S0=3.6710%, 1 strikes
+    ATM normal vol = 97.09 bps, Black vol = 26.76%
 
-  --- 4Y x 7Y ---
-  I=4, J=11
-  S0 = 3.6926%
-  A0 = 5.243047
-  Pi_sum = 0.998379
-  Strikes: [3.69255087]
-  IVs (%): [26.33]
-  Prices: [0.04020743]
+  4Y x 7Y (I=4, J=11): S0=3.6926%, 1 strikes
+    ATM normal vol = 96.19 bps, Black vol = 26.35%
 
-  --- 5Y x 1Y ---
-  I=5, J=6
-  S0 = 3.6225%
-  A0 = 0.803512
-  Pi_sum = 1.000000
-  Strikes: [1.62247066 2.62247066 3.12247066 3.37247066 3.62247066 3.87247066
- 4.12247066 4.62247066 5.62247066]
-  IVs (%): [112.79 104.71 102.47 101.63  28.5  100.36  99.89  99.2   98.5 ]
-  Prices: [0.00911969 0.01511823 0.01828923 0.01991481 0.00727675 0.02122905
- 0.02091485 0.02034478 0.01939593]
+  5Y x 1Y (I=5, J=6): S0=3.6225%, 9 strikes
+    ATM normal vol = 100.86 bps, Black vol = 28.31%
 
-  --- 5Y x 2Y ---
-  I=5, J=7
-  S0 = 3.6364%
-  A0 = 1.578722
-  Pi_sum = 0.999931
-  Strikes: [1.63643822 2.63643822 3.13643822 3.38643822 3.63643822 3.88643822
- 4.13643822 4.63643822 5.63643822]
-  IVs (%): [111.32 103.16 100.9  100.06  27.75  98.79  98.34  97.68  97.08]
-  Prices: [0.01786896 0.02952936 0.03570853 0.03888147 0.01398676 0.04142599
- 0.0407977  0.03965711 0.03777926]
+  5Y x 2Y (I=5, J=7): S0=3.6364%, 9 strikes
+    ATM normal vol = 99.33 bps, Black vol = 27.75%
 
-  --- 5Y x 3Y ---
-  I=5, J=8
-  S0 = 3.6523%
-  A0 = 2.326374
-  Pi_sum = 0.999796
-  Strikes: [1.65232322 2.65232322 3.15232322 3.40232322 3.65232322 3.90232322
- 4.15232322 4.65232322 5.65232322]
-  IVs (%): [109.28 101.47  99.38  98.62  27.22  97.53  97.16  96.67  96.35]
-  Prices: [0.02615186 0.04322792 0.05232208 0.05699892 0.02031746 0.06077414
- 0.05986366 0.05822896 0.05555823]
+  5Y x 3Y (I=5, J=8): S0=3.6523%, 9 strikes
+    ATM normal vol = 97.96 bps, Black vol = 27.24%
 
-  --- 5Y x 4Y ---
-  I=5, J=9
-  S0 = 3.6715%
-  A0 = 3.047117
-  Pi_sum = 0.999556
-  Strikes: [3.67153833]
-  IVs (%): [26.78]
-  Prices: [0.02633254]
+  5Y x 4Y (I=5, J=9): S0=3.6715%, 1 strikes
+    ATM normal vol = 96.90 bps, Black vol = 26.79%
 
-  --- 5Y x 5Y ---
-  I=5, J=10
-  S0 = 3.6915%
-  A0 = 3.741615
-  Pi_sum = 0.999237
-  Strikes: [1.6914937 2.6914937 3.1914937 3.4414937 3.6914937 3.9414937 4.1914937
- 4.6914937 5.6914937]
-  IVs (%): [105.95  99.05  97.18  96.5   26.35  95.49  95.14  94.65  94.24]
-  Prices: [0.04188938 0.0692632  0.08385033 0.09135266 0.03200303 0.09735688
- 0.09585379 0.09312971 0.08860316]
+  5Y x 5Y (I=5, J=10): S0=3.6915%, 9 strikes
+    ATM normal vol = 95.89 bps, Black vol = 26.35%
 
-  --- 5Y x 6Y ---
-  I=5, J=11
-  S0 = 3.7141%
-  A0 = 4.410428
-  Pi_sum = 0.998782
-  Strikes: [3.71405697]
-  IVs (%): [25.96]
-  Prices: [0.03740811]
+  5Y x 6Y (I=5, J=11): S0=3.7141%, 1 strikes
+    ATM normal vol = 95.17 bps, Black vol = 25.99%
 
-  --- 6Y x 1Y ---
-  I=6, J=7
-  S0 = 3.6509%
-  A0 = 0.775210
-  Pi_sum = 1.000000
-  Strikes: [3.65091573]
-  IVs (%): [27.82]
-  Prices: [0.00754789]
+  6Y x 1Y (I=6, J=7): S0=3.6509%, 1 strikes
+    ATM normal vol = 98.91 bps, Black vol = 27.61%
 
-  --- 6Y x 2Y ---
-  I=6, J=8
-  S0 = 3.6681%
-  A0 = 1.522862
-  Pi_sum = 0.999915
-  Strikes: [3.66807441]
-  IVs (%): [26.97]
-  Prices: [0.01445857]
+  6Y x 2Y (I=6, J=8): S0=3.6681%, 1 strikes
+    ATM normal vol = 97.22 bps, Black vol = 26.99%
 
-  --- 6Y x 3Y ---
-  I=6, J=9
-  S0 = 3.6891%
-  A0 = 2.243605
-  Pi_sum = 0.999734
-  Strikes: [3.68911114]
-  IVs (%): [26.52]
-  Prices: [0.02107875]
+  6Y x 3Y (I=6, J=9): S0=3.6891%, 1 strikes
+    ATM normal vol = 96.17 bps, Black vol = 26.53%
 
-  --- 6Y x 4Y ---
-  I=6, J=10
-  S0 = 3.7104%
-  A0 = 2.938103
-  Pi_sum = 0.999478
-  Strikes: [3.71037012]
-  IVs (%): [26.05]
-  Prices: [0.02728724]
+  6Y x 4Y (I=6, J=10): S0=3.7104%, 1 strikes
+    ATM normal vol = 95.03 bps, Black vol = 26.05%
 
-  --- 6Y x 5Y ---
-  I=6, J=11
-  S0 = 3.7345%
-  A0 = 3.606916
-  Pi_sum = 0.999090
-  Strikes: [3.73445964]
-  IVs (%): [25.63]
-  Prices: [0.03319041]
+  6Y x 5Y (I=6, J=11): S0=3.7345%, 1 strikes
+    ATM normal vol = 94.25 bps, Black vol = 25.65%
 
-  --- 7Y x 1Y ---
-  I=7, J=8
-  S0 = 3.6859%
-  A0 = 0.747652
-  Pi_sum = 1.000000
-  Strikes: [1.68586553 2.68586553 3.18586553 3.43586553 3.68586553 3.93586553
- 4.18586553 4.68586553 5.68586553]
-  IVs (%): [107.52 100.22  98.25  97.52  27.02  96.46  96.08  95.55  95.09]
-  Prices: [0.0097861  0.0157502  0.01886145 0.02044732 0.0076951  0.02180805
- 0.02157925 0.02116701 0.02048717]
+  7Y x 1Y (I=7, J=8): S0=3.6859%, 9 strikes
+    ATM normal vol = 96.89 bps, Black vol = 26.84%
 
-  --- 7Y x 2Y ---
-  I=7, J=9
-  S0 = 3.7093%
-  A0 = 1.468395
-  Pi_sum = 0.999884
-  Strikes: [1.70927564 2.70927564 3.20927564 3.45927564 3.70927564 3.95927564
- 4.20927564 4.70927564 5.70927564]
-  IVs (%): [105.92  98.83  96.91  96.21  26.28  95.18  94.82  94.33  93.93]
-  Prices: [0.01928321 0.0309276  0.03700999 0.04011478 0.01480944 0.04276512
- 0.04230808 0.04148682 0.04013369]
+  7Y x 2Y (I=7, J=9): S0=3.7093%, 9 strikes
+    ATM normal vol = 95.59 bps, Black vol = 26.29%
 
-  --- 7Y x 3Y ---
-  I=7, J=10
-  S0 = 3.7317%
-  A0 = 2.162893
-  Pi_sum = 0.999699
-  Strikes: [1.73167937 2.73167937 3.23167937 3.48167937 3.73167937 3.98167937
- 4.23167937 4.73167937 5.73167937]
-  IVs (%): [104.58  97.64  95.79  95.12  25.84  94.17  93.85  93.42  93.15]
-  Prices: [0.02851831 0.04557553 0.05450829 0.05907112 0.0215923  0.06296963
- 0.06229752 0.06108746 0.05911573]
+  7Y x 3Y (I=7, J=10): S0=3.7317%, 9 strikes
+    ATM normal vol = 94.56 bps, Black vol = 25.83%
 
-  --- 7Y x 4Y ---
-  I=7, J=11
-  S0 = 3.7573%
-  A0 = 2.831706
-  Pi_sum = 0.999385
-  Strikes: [3.75733068]
-  IVs (%): [25.35]
-  Prices: [0.0279438]
+  7Y x 4Y (I=7, J=11): S0=3.7573%, 1 strikes
+    ATM normal vol = 93.61 bps, Black vol = 25.38%
 
-  --- 8Y x 1Y ---
-  I=8, J=9
-  S0 = 3.7336%
-  A0 = 0.720743
-  Pi_sum = 1.000000
-  Strikes: [3.73355978]
-  IVs (%): [26.38]
-  Prices: [0.00782803]
+  8Y x 1Y (I=8, J=9): S0=3.7336%, 1 strikes
+    ATM normal vol = 95.45 bps, Black vol = 26.15%
 
-  --- 8Y x 2Y ---
-  I=8, J=10
-  S0 = 3.7559%
-  A0 = 1.415241
-  Pi_sum = 0.999890
-  Strikes: [3.7558822]
-  IVs (%): [25.57]
-  Prices: [0.01500877]
+  8Y x 2Y (I=8, J=10): S0=3.7559%, 1 strikes
+    ATM normal vol = 93.92 bps, Black vol = 25.55%
 
-  --- 8Y x 3Y ---
-  I=8, J=11
-  S0 = 3.7830%
-  A0 = 2.084054
-  Pi_sum = 0.999656
-  Strikes: [3.78296873]
-  IVs (%): [24.96]
-  Prices: [0.02175189]
+  8Y x 3Y (I=8, J=11): S0=3.7830%, 1 strikes
+    ATM normal vol = 92.64 bps, Black vol = 25.00%
 
-  --- 9Y x 1Y ---
-  I=9, J=10
-  S0 = 3.7790%
-  A0 = 0.694498
-  Pi_sum = 1.000000
-  Strikes: [3.77904819]
-  IVs (%): [25.52]
-  Prices: [0.00782459]
+  9Y x 1Y (I=9, J=10): S0=3.7790%, 1 strikes
+    ATM normal vol = 93.44 bps, Black vol = 25.32%
 
-  --- 9Y x 2Y ---
-  I=9, J=11
-  S0 = 3.8091%
-  A0 = 1.363311
-  Pi_sum = 0.999851
-  Strikes: [3.80908981]
-  IVs (%): [24.65]
-  Prices: [0.01497816]
+  9Y x 2Y (I=9, J=11): S0=3.8091%, 1 strikes
+    ATM normal vol = 92.04 bps, Black vol = 24.72%
 
-  --- 10Y x 1Y ---
-  I=10, J=11
-  S0 = 3.8403%
-  A0 = 0.668813
-  Pi_sum = 1.000000
-  Strikes: [1.84028511 2.84028511 3.34028511 3.59028511 3.84028511 4.09028511
- 4.34028511 4.84028511 5.84028511]
-  IVs (%): [100.54  94.49  92.8   92.18  24.48  91.24  90.9   90.42  89.98]
-  Prices: [0.01035405 0.01602045 0.01893423 0.02041245 0.00773844 0.02173208
- 0.02157333 0.02128722 0.02081452]
+  10Y x 1Y (I=10, J=11): S0=3.8403%, 9 strikes
+    ATM normal vol = 91.64 bps, Black vol = 24.46%
+
+============================================================
+Date: 2024-12-10
+============================================================
+
+Discount factors:
+  P(T_0) = 1.00000000
+  P(T_1) = 0.96017667
+  P(T_2) = 0.92539273
+  P(T_3) = 0.89269375
+  P(T_4) = 0.86167507
+  P(T_5) = 0.83177418
+  P(T_6) = 0.80257803
+  P(T_7) = 0.77418618
+  P(T_8) = 0.74656532
+  P(T_9) = 0.71962768
+  P(T_10) = 0.69333656
+  P(T_11) = 0.66755049
+
+Forward term rates:
+  R_1 = 4.1475%
+  R_2 = 3.7588%
+  R_3 = 3.6630%
+  R_4 = 3.5998%
+  R_5 = 3.5948%
+  R_6 = 3.6378%
+  R_7 = 3.6673%
+  R_8 = 3.6997%
+  R_9 = 3.7433%
+  R_10 = 3.7920%
+  R_11 = 3.8628%
+
+Swaptions (55 total):
+
+  1Y x 1Y (I=1, J=2): S0=3.7588%, 9 strikes
+    ATM normal vol = 113.61 bps, Black vol = 30.34%
+
+  1Y x 2Y (I=1, J=3): S0=3.7118%, 9 strikes
+    ATM normal vol = 110.74 bps, Black vol = 29.95%
+
+  1Y x 3Y (I=1, J=4): S0=3.6758%, 9 strikes
+    ATM normal vol = 107.30 bps, Black vol = 29.30%
+
+  1Y x 4Y (I=1, J=5): S0=3.6566%, 1 strikes
+    ATM normal vol = 105.59 bps, Black vol = 28.98%
+
+  1Y x 5Y (I=1, J=6): S0=3.6531%, 9 strikes
+    ATM normal vol = 104.10 bps, Black vol = 28.59%
+
+  1Y x 6Y (I=1, J=7): S0=3.6553%, 1 strikes
+    ATM normal vol = 102.38 bps, Black vol = 28.10%
+
+  1Y x 7Y (I=1, J=8): S0=3.6609%, 9 strikes
+    ATM normal vol = 100.88 bps, Black vol = 27.64%
+
+  1Y x 8Y (I=1, J=9): S0=3.6700%, 1 strikes
+    ATM normal vol = 99.59 bps, Black vol = 27.22%
+
+  1Y x 9Y (I=1, J=10): S0=3.6817%, 1 strikes
+    ATM normal vol = 98.55 bps, Black vol = 26.85%
+
+  1Y x 10Y (I=1, J=11): S0=3.6969%, 9 strikes
+    ATM normal vol = 97.60 bps, Black vol = 26.48%
+
+  2Y x 1Y (I=2, J=3): S0=3.6630%, 1 strikes
+    ATM normal vol = 110.51 bps, Black vol = 30.40%
+
+  2Y x 2Y (I=2, J=4): S0=3.6319%, 1 strikes
+    ATM normal vol = 107.72 bps, Black vol = 29.88%
+
+  2Y x 3Y (I=2, J=5): S0=3.6200%, 1 strikes
+    ATM normal vol = 105.02 bps, Black vol = 29.22%
+
+  2Y x 4Y (I=2, J=6): S0=3.6242%, 1 strikes
+    ATM normal vol = 103.69 bps, Black vol = 28.81%
+
+  2Y x 5Y (I=2, J=7): S0=3.6322%, 1 strikes
+    ATM normal vol = 101.97 bps, Black vol = 28.26%
+
+  2Y x 6Y (I=2, J=8): S0=3.6425%, 1 strikes
+    ATM normal vol = 100.56 bps, Black vol = 27.79%
+
+  2Y x 7Y (I=2, J=9): S0=3.6554%, 1 strikes
+    ATM normal vol = 99.31 bps, Black vol = 27.34%
+
+  2Y x 8Y (I=2, J=10): S0=3.6704%, 1 strikes
+    ATM normal vol = 98.34 bps, Black vol = 26.96%
+
+  2Y x 9Y (I=2, J=11): S0=3.6887%, 1 strikes
+    ATM normal vol = 97.63 bps, Black vol = 26.62%
+
+  3Y x 1Y (I=3, J=4): S0=3.5998%, 9 strikes
+    ATM normal vol = 106.64 bps, Black vol = 29.96%
+
+  3Y x 2Y (I=3, J=5): S0=3.5974%, 9 strikes
+    ATM normal vol = 104.06 bps, Black vol = 29.24%
+
+  3Y x 3Y (I=3, J=6): S0=3.6104%, 9 strikes
+    ATM normal vol = 102.30 bps, Black vol = 28.63%
+
+  3Y x 4Y (I=3, J=7): S0=3.6238%, 1 strikes
+    ATM normal vol = 101.27 bps, Black vol = 28.22%
+
+  3Y x 5Y (I=3, J=8): S0=3.6380%, 9 strikes
+    ATM normal vol = 99.83 bps, Black vol = 27.70%
+
+  3Y x 6Y (I=3, J=9): S0=3.6540%, 1 strikes
+    ATM normal vol = 98.82 bps, Black vol = 27.30%
+
+  3Y x 7Y (I=3, J=10): S0=3.6716%, 9 strikes
+    ATM normal vol = 97.73 bps, Black vol = 26.86%
+
+  3Y x 8Y (I=3, J=11): S0=3.6925%, 1 strikes
+    ATM normal vol = 96.91 bps, Black vol = 26.48%
+
+  4Y x 1Y (I=4, J=5): S0=3.5948%, 1 strikes
+    ATM normal vol = 103.51 bps, Black vol = 29.20%
+
+  4Y x 2Y (I=4, J=6): S0=3.6159%, 1 strikes
+    ATM normal vol = 101.47 bps, Black vol = 28.44%
+
+  4Y x 3Y (I=4, J=7): S0=3.6324%, 1 strikes
+    ATM normal vol = 100.00 bps, Black vol = 27.89%
+
+  4Y x 4Y (I=4, J=8): S0=3.6484%, 1 strikes
+    ATM normal vol = 98.97 bps, Black vol = 27.47%
+
+  4Y x 5Y (I=4, J=9): S0=3.6660%, 1 strikes
+    ATM normal vol = 97.99 bps, Black vol = 27.06%
+
+  4Y x 6Y (I=4, J=10): S0=3.6851%, 1 strikes
+    ATM normal vol = 97.11 bps, Black vol = 26.66%
+
+  4Y x 7Y (I=4, J=11): S0=3.7078%, 1 strikes
+    ATM normal vol = 96.24 bps, Black vol = 26.25%
+
+  5Y x 1Y (I=5, J=6): S0=3.6378%, 9 strikes
+    ATM normal vol = 101.00 bps, Black vol = 28.23%
+
+  5Y x 2Y (I=5, J=7): S0=3.6523%, 9 strikes
+    ATM normal vol = 99.55 bps, Black vol = 27.69%
+
+  5Y x 3Y (I=5, J=8): S0=3.6675%, 9 strikes
+    ATM normal vol = 98.08 bps, Black vol = 27.15%
+
+  5Y x 4Y (I=5, J=9): S0=3.6854%, 1 strikes
+    ATM normal vol = 96.95 bps, Black vol = 26.70%
+
+  5Y x 5Y (I=5, J=10): S0=3.7052%, 9 strikes
+    ATM normal vol = 95.93 bps, Black vol = 26.26%
+
+  5Y x 6Y (I=5, J=11): S0=3.7291%, 1 strikes
+    ATM normal vol = 95.09 bps, Black vol = 25.86%
+
+  6Y x 1Y (I=6, J=7): S0=3.6673%, 1 strikes
+    ATM normal vol = 98.77 bps, Black vol = 27.44%
+
+  6Y x 2Y (I=6, J=8): S0=3.6832%, 1 strikes
+    ATM normal vol = 97.38 bps, Black vol = 26.92%
+
+  6Y x 3Y (I=6, J=9): S0=3.7025%, 1 strikes
+    ATM normal vol = 96.13 bps, Black vol = 26.42%
+
+  6Y x 4Y (I=6, J=10): S0=3.7237%, 1 strikes
+    ATM normal vol = 95.06 bps, Black vol = 25.96%
+
+  6Y x 5Y (I=6, J=11): S0=3.7494%, 1 strikes
+    ATM normal vol = 94.26 bps, Black vol = 25.55%
+
+  7Y x 1Y (I=7, J=8): S0=3.6997%, 9 strikes
+    ATM normal vol = 96.86 bps, Black vol = 26.73%
+
+  7Y x 2Y (I=7, J=9): S0=3.7211%, 9 strikes
+    ATM normal vol = 95.65 bps, Black vol = 26.22%
+
+  7Y x 3Y (I=7, J=10): S0=3.7439%, 9 strikes
+    ATM normal vol = 94.51 bps, Black vol = 25.73%
+
+  7Y x 4Y (I=7, J=11): S0=3.7719%, 1 strikes
+    ATM normal vol = 93.50 bps, Black vol = 25.25%
+
+  8Y x 1Y (I=8, J=9): S0=3.7433%, 1 strikes
+    ATM normal vol = 95.21 bps, Black vol = 26.01%
+
+  8Y x 2Y (I=8, J=10): S0=3.7672%, 1 strikes
+    ATM normal vol = 93.92 bps, Black vol = 25.47%
+
+  8Y x 3Y (I=8, J=11): S0=3.7979%, 1 strikes
+    ATM normal vol = 92.57 bps, Black vol = 24.88%
+
+  9Y x 1Y (I=9, J=10): S0=3.7920%, 1 strikes
+    ATM normal vol = 93.30 bps, Black vol = 25.19%
+
+  9Y x 2Y (I=9, J=11): S0=3.8267%, 1 strikes
+    ATM normal vol = 91.99 bps, Black vol = 24.58%
+
+  10Y x 1Y (I=10, J=11): S0=3.8628%, 9 strikes
+    ATM normal vol = 91.53 bps, Black vol = 24.28%
+
+============================================================
+Date: 2024-12-11
+============================================================
+
+Discount factors:
+  P(T_0) = 1.00000000
+  P(T_1) = 0.96022738
+  P(T_2) = 0.92514343
+  P(T_3) = 0.89196952
+  P(T_4) = 0.86050674
+  P(T_5) = 0.83015773
+  P(T_6) = 0.80059915
+  P(T_7) = 0.77186073
+  P(T_8) = 0.74393635
+  P(T_9) = 0.71670208
+  P(T_10) = 0.69016529
+  P(T_11) = 0.66412197
+
+Forward term rates:
+  R_1 = 4.1420%
+  R_2 = 3.7923%
+  R_3 = 3.7192%
+  R_4 = 3.6563%
+  R_5 = 3.6558%
+  R_6 = 3.6921%
+  R_7 = 3.7233%
+  R_8 = 3.7536%
+  R_9 = 3.7999%
+  R_10 = 3.8450%
+  R_11 = 3.9215%
+
+Swaptions (55 total):
+
+  1Y x 1Y (I=1, J=2): S0=3.7923%, 9 strikes
+    ATM normal vol = 112.03 bps, Black vol = 29.65%
+
+  1Y x 2Y (I=1, J=3): S0=3.7564%, 9 strikes
+    ATM normal vol = 109.26 bps, Black vol = 29.19%
+
+  1Y x 3Y (I=1, J=4): S0=3.7242%, 9 strikes
+    ATM normal vol = 105.11 bps, Black vol = 28.32%
+
+  1Y x 4Y (I=1, J=5): S0=3.7080%, 1 strikes
+    ATM normal vol = 103.88 bps, Black vol = 28.11%
+
+  1Y x 5Y (I=1, J=6): S0=3.7051%, 9 strikes
+    ATM normal vol = 102.62 bps, Black vol = 27.79%
+
+  1Y x 6Y (I=1, J=7): S0=3.7078%, 1 strikes
+    ATM normal vol = 100.76 bps, Black vol = 27.26%
+
+  1Y x 7Y (I=1, J=8): S0=3.7137%, 9 strikes
+    ATM normal vol = 99.32 bps, Black vol = 26.82%
+
+  1Y x 8Y (I=1, J=9): S0=3.7231%, 1 strikes
+    ATM normal vol = 98.23 bps, Black vol = 26.46%
+
+  1Y x 9Y (I=1, J=10): S0=3.7348%, 1 strikes
+    ATM normal vol = 97.22 bps, Black vol = 26.11%
+
+  1Y x 10Y (I=1, J=11): S0=3.7505%, 9 strikes
+    ATM normal vol = 96.26 bps, Black vol = 25.74%
+
+  2Y x 1Y (I=2, J=3): S0=3.7192%, 1 strikes
+    ATM normal vol = 109.17 bps, Black vol = 29.57%
+
+  2Y x 2Y (I=2, J=4): S0=3.6883%, 1 strikes
+    ATM normal vol = 106.32 bps, Black vol = 29.03%
+
+  2Y x 3Y (I=2, J=5): S0=3.6779%, 1 strikes
+    ATM normal vol = 103.70 bps, Black vol = 28.39%
+
+  2Y x 4Y (I=2, J=6): S0=3.6812%, 1 strikes
+    ATM normal vol = 102.48 bps, Black vol = 28.02%
+
+  2Y x 5Y (I=2, J=7): S0=3.6890%, 1 strikes
+    ATM normal vol = 100.97 bps, Black vol = 27.54%
+
+  2Y x 6Y (I=2, J=8): S0=3.6988%, 1 strikes
+    ATM normal vol = 99.52 bps, Black vol = 27.07%
+
+  2Y x 7Y (I=2, J=9): S0=3.7117%, 1 strikes
+    ATM normal vol = 98.24 bps, Black vol = 26.62%
+
+  2Y x 8Y (I=2, J=10): S0=3.7263%, 1 strikes
+    ATM normal vol = 97.25 bps, Black vol = 26.25%
+
+  2Y x 9Y (I=2, J=11): S0=3.7449%, 1 strikes
+    ATM normal vol = 96.43 bps, Black vol = 25.89%
+
+  3Y x 1Y (I=3, J=4): S0=3.6563%, 9 strikes
+    ATM normal vol = 105.87 bps, Black vol = 29.27%
+
+  3Y x 2Y (I=3, J=5): S0=3.6561%, 9 strikes
+    ATM normal vol = 103.20 bps, Black vol = 28.51%
+
+  3Y x 3Y (I=3, J=6): S0=3.6676%, 9 strikes
+    ATM normal vol = 101.51 bps, Black vol = 27.95%
+
+  3Y x 4Y (I=3, J=7): S0=3.6808%, 1 strikes
+    ATM normal vol = 100.35 bps, Black vol = 27.52%
+
+  3Y x 5Y (I=3, J=8): S0=3.6943%, 9 strikes
+    ATM normal vol = 98.88 bps, Black vol = 27.01%
+
+  3Y x 6Y (I=3, J=9): S0=3.7103%, 1 strikes
+    ATM normal vol = 97.85 bps, Black vol = 26.61%
+
+  3Y x 7Y (I=3, J=10): S0=3.7275%, 9 strikes
+    ATM normal vol = 96.82 bps, Black vol = 26.20%
+
+  3Y x 8Y (I=3, J=11): S0=3.7487%, 1 strikes
+    ATM normal vol = 96.02 bps, Black vol = 25.83%
+
+  4Y x 1Y (I=4, J=5): S0=3.6558%, 1 strikes
+    ATM normal vol = 102.78 bps, Black vol = 28.50%
+
+  4Y x 2Y (I=4, J=6): S0=3.6736%, 1 strikes
+    ATM normal vol = 100.74 bps, Black vol = 27.78%
+
+  4Y x 3Y (I=4, J=7): S0=3.6896%, 1 strikes
+    ATM normal vol = 99.12 bps, Black vol = 27.20%
+
+  4Y x 4Y (I=4, J=8): S0=3.7047%, 1 strikes
+    ATM normal vol = 98.12 bps, Black vol = 26.80%
+
+  4Y x 5Y (I=4, J=9): S0=3.7224%, 1 strikes
+    ATM normal vol = 97.08 bps, Black vol = 26.38%
+
+  4Y x 6Y (I=4, J=10): S0=3.7410%, 1 strikes
+    ATM normal vol = 96.29 bps, Black vol = 26.03%
+
+  4Y x 7Y (I=4, J=11): S0=3.7639%, 1 strikes
+    ATM normal vol = 95.25 bps, Black vol = 25.58%
+
+  5Y x 1Y (I=5, J=6): S0=3.6921%, 9 strikes
+    ATM normal vol = 100.27 bps, Black vol = 27.59%
+
+  5Y x 2Y (I=5, J=7): S0=3.7074%, 9 strikes
+    ATM normal vol = 98.46 bps, Black vol = 26.96%
+
+  5Y x 3Y (I=5, J=8): S0=3.7222%, 9 strikes
+    ATM normal vol = 97.09 bps, Black vol = 26.47%
+
+  5Y x 4Y (I=5, J=9): S0=3.7406%, 1 strikes
+    ATM normal vol = 96.07 bps, Black vol = 26.05%
+
+  5Y x 5Y (I=5, J=10): S0=3.7599%, 9 strikes
+    ATM normal vol = 95.05 bps, Black vol = 25.63%
+
+  5Y x 6Y (I=5, J=11): S0=3.7844%, 1 strikes
+    ATM normal vol = 94.24 bps, Black vol = 25.23%
+
+  6Y x 1Y (I=6, J=7): S0=3.7233%, 1 strikes
+    ATM normal vol = 98.12 bps, Black vol = 26.83%
+
+  6Y x 2Y (I=6, J=8): S0=3.7382%, 1 strikes
+    ATM normal vol = 96.56 bps, Black vol = 26.28%
+
+  6Y x 3Y (I=6, J=9): S0=3.7580%, 1 strikes
+    ATM normal vol = 95.32 bps, Black vol = 25.79%
+
+  6Y x 4Y (I=6, J=10): S0=3.7785%, 1 strikes
+    ATM normal vol = 94.27 bps, Black vol = 25.35%
+
+  6Y x 5Y (I=6, J=11): S0=3.8050%, 1 strikes
+    ATM normal vol = 93.41 bps, Black vol = 24.93%
+
+  7Y x 1Y (I=7, J=8): S0=3.7536%, 9 strikes
+    ATM normal vol = 96.21 bps, Black vol = 26.14%
+
+  7Y x 2Y (I=7, J=9): S0=3.7763%, 9 strikes
+    ATM normal vol = 94.80 bps, Black vol = 25.58%
+
+  7Y x 3Y (I=7, J=10): S0=3.7984%, 9 strikes
+    ATM normal vol = 93.58 bps, Black vol = 25.09%
+
+  7Y x 4Y (I=7, J=11): S0=3.8274%, 1 strikes
+    ATM normal vol = 92.65 bps, Black vol = 24.64%
+
+  8Y x 1Y (I=8, J=9): S0=3.7999%, 1 strikes
+    ATM normal vol = 94.52 bps, Black vol = 25.41%
+
+  8Y x 2Y (I=8, J=10): S0=3.8220%, 1 strikes
+    ATM normal vol = 93.13 bps, Black vol = 24.87%
+
+  8Y x 3Y (I=8, J=11): S0=3.8539%, 1 strikes
+    ATM normal vol = 91.80 bps, Black vol = 24.29%
+
+  9Y x 1Y (I=9, J=10): S0=3.8450%, 1 strikes
+    ATM normal vol = 92.76 bps, Black vol = 24.68%
+
+  9Y x 2Y (I=9, J=11): S0=3.8825%, 1 strikes
+    ATM normal vol = 91.26 bps, Black vol = 24.01%
+
+  10Y x 1Y (I=10, J=11): S0=3.9215%, 9 strikes
+    ATM normal vol = 91.04 bps, Black vol = 23.76%
+
+============================================================
+Date: 2025-12-08
+============================================================
+
+Discount factors:
+  P(T_0) = 1.00000000
+  P(T_1) = 0.96587002
+  P(T_2) = 0.93572697
+  P(T_3) = 0.90537691
+  P(T_4) = 0.87474783
+  P(T_5) = 0.84383438
+  P(T_6) = 0.81261163
+  P(T_7) = 0.78135159
+  P(T_8) = 0.75026312
+  P(T_9) = 0.71948179
+  P(T_10) = 0.68908985
+  P(T_11) = 0.65937520
+
+Forward term rates:
+  R_1 = 3.5336%
+  R_2 = 3.2214%
+  R_3 = 3.3522%
+  R_4 = 3.5015%
+  R_5 = 3.6634%
+  R_6 = 3.8423%
+  R_7 = 4.0008%
+  R_8 = 4.1437%
+  R_9 = 4.2783%
+  R_10 = 4.4104%
+  R_11 = 4.5065%
+
+Swaptions (55 total):
+
+  1Y x 1Y (I=1, J=2): S0=3.2214%, 9 strikes
+    ATM normal vol = 80.91 bps, Black vol = 25.18%
+
+  1Y x 2Y (I=1, J=3): S0=3.2857%, 9 strikes
+    ATM normal vol = 83.86 bps, Black vol = 25.59%
+
+  1Y x 3Y (I=1, J=4): S0=3.3552%, 9 strikes
+    ATM normal vol = 84.11 bps, Black vol = 25.13%
+
+  1Y x 4Y (I=1, J=5): S0=3.4283%, 1 strikes
+    ATM normal vol = 84.13 bps, Black vol = 24.60%
+
+  1Y x 5Y (I=1, J=6): S0=3.5052%, 9 strikes
+    ATM normal vol = 84.16 bps, Black vol = 24.07%
+
+  1Y x 6Y (I=1, J=7): S0=3.5803%, 1 strikes
+    ATM normal vol = 83.53 bps, Black vol = 23.38%
+
+  1Y x 7Y (I=1, J=8): S0=3.6519%, 9 strikes
+    ATM normal vol = 83.32 bps, Black vol = 22.87%
+
+  1Y x 8Y (I=1, J=9): S0=3.7200%, 1 strikes
+    ATM normal vol = 82.91 bps, Black vol = 22.33%
+
+  1Y x 9Y (I=1, J=10): S0=3.7850%, 1 strikes
+    ATM normal vol = 82.66 bps, Black vol = 21.88%
+
+  1Y x 10Y (I=1, J=11): S0=3.8447%, 9 strikes
+    ATM normal vol = 82.46 bps, Black vol = 21.49%
+
+  2Y x 1Y (I=2, J=3): S0=3.3522%, 1 strikes
+    ATM normal vol = 85.01 bps, Black vol = 25.50%
+
+  2Y x 2Y (I=2, J=4): S0=3.4256%, 1 strikes
+    ATM normal vol = 85.57 bps, Black vol = 25.11%
+
+  2Y x 3Y (I=2, J=5): S0=3.5021%, 1 strikes
+    ATM normal vol = 85.90 bps, Black vol = 24.65%
+
+  2Y x 4Y (I=2, J=6): S0=3.5825%, 1 strikes
+    ATM normal vol = 85.63 bps, Black vol = 24.02%
+
+  2Y x 5Y (I=2, J=7): S0=3.6600%, 1 strikes
+    ATM normal vol = 85.31 bps, Black vol = 23.42%
+
+  2Y x 6Y (I=2, J=8): S0=3.7330%, 1 strikes
+    ATM normal vol = 84.76 bps, Black vol = 22.80%
+
+  2Y x 7Y (I=2, J=9): S0=3.8020%, 1 strikes
+    ATM normal vol = 84.33 bps, Black vol = 22.27%
+
+  2Y x 8Y (I=2, J=10): S0=3.8678%, 1 strikes
+    ATM normal vol = 84.03 bps, Black vol = 21.81%
+
+  2Y x 9Y (I=2, J=11): S0=3.9276%, 1 strikes
+    ATM normal vol = 83.78 bps, Black vol = 21.41%
+
+  3Y x 1Y (I=3, J=4): S0=3.5015%, 9 strikes
+    ATM normal vol = 87.02 bps, Black vol = 25.05%
+
+  3Y x 2Y (I=3, J=5): S0=3.5810%, 9 strikes
+    ATM normal vol = 86.54 bps, Black vol = 24.35%
+
+  3Y x 3Y (I=3, J=6): S0=3.6649%, 9 strikes
+    ATM normal vol = 86.52 bps, Black vol = 23.77%
+
+  3Y x 4Y (I=3, J=7): S0=3.7441%, 1 strikes
+    ATM normal vol = 86.22 bps, Black vol = 23.18%
+
+  3Y x 5Y (I=3, J=8): S0=3.8179%, 9 strikes
+    ATM normal vol = 85.91 bps, Black vol = 22.65%
+
+  3Y x 6Y (I=3, J=9): S0=3.8872%, 1 strikes
+    ATM normal vol = 85.34 bps, Black vol = 22.09%
+
+  3Y x 7Y (I=3, J=10): S0=3.9531%, 9 strikes
+    ATM normal vol = 84.93 bps, Black vol = 21.61%
+
+  3Y x 8Y (I=3, J=11): S0=4.0126%, 1 strikes
+    ATM normal vol = 84.61 bps, Black vol = 21.20%
+
+  4Y x 1Y (I=4, J=5): S0=3.6634%, 1 strikes
+    ATM normal vol = 87.60 bps, Black vol = 24.14%
+
+  4Y x 2Y (I=4, J=6): S0=3.7512%, 1 strikes
+    ATM normal vol = 87.19 bps, Black vol = 23.46%
+
+  4Y x 3Y (I=4, J=7): S0=3.8312%, 1 strikes
+    ATM normal vol = 86.86 bps, Black vol = 22.87%
+
+  4Y x 4Y (I=4, J=8): S0=3.9047%, 1 strikes
+    ATM normal vol = 86.58 bps, Black vol = 22.36%
+
+  4Y x 5Y (I=4, J=9): S0=3.9735%, 1 strikes
+    ATM normal vol = 86.31 bps, Black vol = 21.90%
+
+  4Y x 6Y (I=4, J=10): S0=4.0390%, 1 strikes
+    ATM normal vol = 85.82 bps, Black vol = 21.41%
+
+  4Y x 7Y (I=4, J=11): S0=4.0976%, 1 strikes
+    ATM normal vol = 85.37 bps, Black vol = 20.99%
+
+  5Y x 1Y (I=5, J=6): S0=3.8423%, 9 strikes
+    ATM normal vol = 87.93 bps, Black vol = 23.14%
+
+  5Y x 2Y (I=5, J=7): S0=3.9200%, 9 strikes
+    ATM normal vol = 87.45 bps, Black vol = 22.55%
+
+  5Y x 3Y (I=5, J=8): S0=3.9916%, 9 strikes
+    ATM normal vol = 86.92 bps, Black vol = 22.00%
+
+  5Y x 4Y (I=5, J=9): S0=4.0589%, 1 strikes
+    ATM normal vol = 86.59 bps, Black vol = 21.54%
+
+  5Y x 5Y (I=5, J=10): S0=4.1234%, 9 strikes
+    ATM normal vol = 86.32 bps, Black vol = 21.13%
+
+  5Y x 6Y (I=5, J=11): S0=4.1807%, 1 strikes
+    ATM normal vol = 85.83 bps, Black vol = 20.71%
+
+  6Y x 1Y (I=6, J=7): S0=4.0008%, 1 strikes
+    ATM normal vol = 87.78 bps, Black vol = 22.21%
+
+  6Y x 2Y (I=6, J=8): S0=4.0708%, 1 strikes
+    ATM normal vol = 87.39 bps, Black vol = 21.72%
+
+  6Y x 3Y (I=6, J=9): S0=4.1371%, 1 strikes
+    ATM normal vol = 86.81 bps, Black vol = 21.22%
+
+  6Y x 4Y (I=6, J=10): S0=4.2012%, 1 strikes
+    ATM normal vol = 86.41 bps, Black vol = 20.79%
+
+  6Y x 5Y (I=6, J=11): S0=4.2571%, 1 strikes
+    ATM normal vol = 86.14 bps, Black vol = 20.45%
+
+  7Y x 1Y (I=7, J=8): S0=4.1437%, 9 strikes
+    ATM normal vol = 87.07 bps, Black vol = 21.29%
+
+  7Y x 2Y (I=7, J=9): S0=4.2096%, 9 strikes
+    ATM normal vol = 86.91 bps, Black vol = 20.91%
+
+  7Y x 3Y (I=7, J=10): S0=4.2737%, 9 strikes
+    ATM normal vol = 86.44 bps, Black vol = 20.47%
+
+  7Y x 4Y (I=7, J=11): S0=4.3282%, 1 strikes
+    ATM normal vol = 86.08 bps, Black vol = 20.12%
+
+  8Y x 1Y (I=8, J=9): S0=4.2783%, 1 strikes
+    ATM normal vol = 86.70 bps, Black vol = 20.55%
+
+  8Y x 2Y (I=8, J=10): S0=4.3429%, 1 strikes
+    ATM normal vol = 86.67 bps, Black vol = 20.23%
+
+  8Y x 3Y (I=8, J=11): S0=4.3951%, 1 strikes
+    ATM normal vol = 86.08 bps, Black vol = 19.84%
+
+  9Y x 1Y (I=9, J=10): S0=4.4104%, 1 strikes
+    ATM normal vol = 86.20 bps, Black vol = 19.83%
+
+  9Y x 2Y (I=9, J=11): S0=4.4574%, 1 strikes
+    ATM normal vol = 86.08 bps, Black vol = 19.59%
+
+  10Y x 1Y (I=10, J=11): S0=4.5065%, 9 strikes
+    ATM normal vol = 85.99 bps, Black vol = 19.38%
+
+============================================================
+Date: 2025-12-09
+============================================================
+
+Discount factors:
+  P(T_0) = 1.00000000
+  P(T_1) = 0.96560328
+  P(T_2) = 0.93489832
+  P(T_3) = 0.90406014
+  P(T_4) = 0.87303821
+  P(T_5) = 0.84188580
+  P(T_6) = 0.81059042
+  P(T_7) = 0.77937251
+  P(T_8) = 0.74840589
+  P(T_9) = 0.71775038
+  P(T_10) = 0.68751044
+  P(T_11) = 0.65795113
+
+Forward term rates:
+  R_1 = 3.5622%
+  R_2 = 3.2843%
+  R_3 = 3.4111%
+  R_4 = 3.5533%
+  R_5 = 3.7003%
+  R_6 = 3.8608%
+  R_7 = 4.0055%
+  R_8 = 4.1377%
+  R_9 = 4.2711%
+  R_10 = 4.3985%
+  R_11 = 4.4926%
+
+Swaptions (55 total):
+
+  1Y x 1Y (I=1, J=2): S0=3.2843%, 9 strikes
+    ATM normal vol = 81.39 bps, Black vol = 24.85%
+
+  1Y x 2Y (I=1, J=3): S0=3.3466%, 9 strikes
+    ATM normal vol = 84.13 bps, Black vol = 25.21%
+
+  1Y x 3Y (I=1, J=4): S0=3.4132%, 9 strikes
+    ATM normal vol = 84.34 bps, Black vol = 24.77%
+
+  1Y x 4Y (I=1, J=5): S0=3.4812%, 1 strikes
+    ATM normal vol = 84.38 bps, Black vol = 24.30%
+
+  1Y x 5Y (I=1, J=6): S0=3.5517%, 9 strikes
+    ATM normal vol = 84.46 bps, Black vol = 23.84%
+
+  1Y x 6Y (I=1, J=7): S0=3.6205%, 1 strikes
+    ATM normal vol = 83.79 bps, Black vol = 23.20%
+
+  1Y x 7Y (I=1, J=8): S0=3.6862%, 9 strikes
+    ATM normal vol = 83.62 bps, Black vol = 22.73%
+
+  1Y x 8Y (I=1, J=9): S0=3.7497%, 1 strikes
+    ATM normal vol = 83.19 bps, Black vol = 22.23%
+
+  1Y x 9Y (I=1, J=10): S0=3.8108%, 1 strikes
+    ATM normal vol = 82.95 bps, Black vol = 21.81%
+
+  1Y x 10Y (I=1, J=11): S0=3.8672%, 9 strikes
+    ATM normal vol = 82.73 bps, Black vol = 21.43%
+
+  2Y x 1Y (I=2, J=3): S0=3.4111%, 1 strikes
+    ATM normal vol = 85.46 bps, Black vol = 25.19%
+
+  2Y x 2Y (I=2, J=4): S0=3.4810%, 1 strikes
+    ATM normal vol = 85.91 bps, Black vol = 24.81%
+
+  2Y x 3Y (I=2, J=5): S0=3.5515%, 1 strikes
+    ATM normal vol = 86.15 bps, Black vol = 24.38%
+
+  2Y x 4Y (I=2, J=6): S0=3.6246%, 1 strikes
+    ATM normal vol = 85.94 bps, Black vol = 23.82%
+
+  2Y x 5Y (I=2, J=7): S0=3.6951%, 1 strikes
+    ATM normal vol = 85.62 bps, Black vol = 23.28%
+
+  2Y x 6Y (I=2, J=8): S0=3.7619%, 1 strikes
+    ATM normal vol = 85.04 bps, Black vol = 22.70%
+
+  2Y x 7Y (I=2, J=9): S0=3.8263%, 1 strikes
+    ATM normal vol = 84.63 bps, Black vol = 22.21%
+
+  2Y x 8Y (I=2, J=10): S0=3.8881%, 1 strikes
+    ATM normal vol = 84.33 bps, Black vol = 21.77%
+
+  2Y x 9Y (I=2, J=11): S0=3.9448%, 1 strikes
+    ATM normal vol = 84.03 bps, Black vol = 21.38%
+
+  3Y x 1Y (I=3, J=4): S0=3.5533%, 9 strikes
+    ATM normal vol = 87.35 bps, Black vol = 24.77%
+
+  3Y x 2Y (I=3, J=5): S0=3.6255%, 9 strikes
+    ATM normal vol = 86.91 bps, Black vol = 24.15%
+
+  3Y x 3Y (I=3, J=6): S0=3.7010%, 9 strikes
+    ATM normal vol = 86.70 bps, Black vol = 23.59%
+
+  3Y x 4Y (I=3, J=7): S0=3.7728%, 1 strikes
+    ATM normal vol = 86.52 bps, Black vol = 23.09%
+
+  3Y x 5Y (I=3, J=8): S0=3.8402%, 9 strikes
+    ATM normal vol = 86.24 bps, Black vol = 22.60%
+
+  3Y x 6Y (I=3, J=9): S0=3.9050%, 1 strikes
+    ATM normal vol = 85.60 bps, Black vol = 22.05%
+
+  3Y x 7Y (I=3, J=10): S0=3.9672%, 9 strikes
+    ATM normal vol = 85.18 bps, Black vol = 21.60%
+
+  3Y x 8Y (I=3, J=11): S0=4.0237%, 1 strikes
+    ATM normal vol = 84.78 bps, Black vol = 21.19%
+
+  4Y x 1Y (I=4, J=5): S0=3.7003%, 1 strikes
+    ATM normal vol = 87.97 bps, Black vol = 24.00%
+
+  4Y x 2Y (I=4, J=6): S0=3.7790%, 1 strikes
+    ATM normal vol = 87.56 bps, Black vol = 23.38%
+
+  4Y x 3Y (I=4, J=7): S0=3.8516%, 1 strikes
+    ATM normal vol = 87.23 bps, Black vol = 22.84%
+
+  4Y x 4Y (I=4, J=8): S0=3.9189%, 1 strikes
+    ATM normal vol = 86.88 bps, Black vol = 22.35%
+
+  4Y x 5Y (I=4, J=9): S0=3.9838%, 1 strikes
+    ATM normal vol = 86.62 bps, Black vol = 21.92%
+
+  4Y x 6Y (I=4, J=10): S0=4.0460%, 1 strikes
+    ATM normal vol = 86.06 bps, Black vol = 21.43%
+
+  4Y x 7Y (I=4, J=11): S0=4.1020%, 1 strikes
+    ATM normal vol = 85.61 bps, Black vol = 21.02%
+
+  5Y x 1Y (I=5, J=6): S0=3.8608%, 9 strikes
+    ATM normal vol = 88.23 bps, Black vol = 23.11%
+
+  5Y x 2Y (I=5, J=7): S0=3.9317%, 9 strikes
+    ATM normal vol = 87.72 bps, Black vol = 22.55%
+
+  5Y x 3Y (I=5, J=8): S0=3.9977%, 9 strikes
+    ATM normal vol = 87.21 bps, Black vol = 22.04%
+
+  5Y x 4Y (I=5, J=9): S0=4.0619%, 1 strikes
+    ATM normal vol = 86.84 bps, Black vol = 21.59%
+
+  5Y x 5Y (I=5, J=10): S0=4.1237%, 9 strikes
+    ATM normal vol = 86.56 bps, Black vol = 21.19%
+
+  5Y x 6Y (I=5, J=11): S0=4.1788%, 1 strikes
+    ATM normal vol = 86.06 bps, Black vol = 20.78%
+
+  6Y x 1Y (I=6, J=7): S0=4.0055%, 1 strikes
+    ATM normal vol = 87.95 bps, Black vol = 22.23%
+
+  6Y x 2Y (I=6, J=8): S0=4.0703%, 1 strikes
+    ATM normal vol = 87.61 bps, Black vol = 21.78%
+
+  6Y x 3Y (I=6, J=9): S0=4.1344%, 1 strikes
+    ATM normal vol = 86.97 bps, Black vol = 21.27%
+
+  6Y x 4Y (I=6, J=10): S0=4.1963%, 1 strikes
+    ATM normal vol = 86.57 bps, Black vol = 20.85%
+
+  6Y x 5Y (I=6, J=11): S0=4.2506%, 1 strikes
+    ATM normal vol = 86.29 bps, Black vol = 20.51%
+
+  7Y x 1Y (I=7, J=8): S0=4.1377%, 9 strikes
+    ATM normal vol = 87.54 bps, Black vol = 21.44%
+
+  7Y x 2Y (I=7, J=9): S0=4.2030%, 9 strikes
+    ATM normal vol = 87.22 bps, Black vol = 21.02%
+
+  7Y x 3Y (I=7, J=10): S0=4.2654%, 9 strikes
+    ATM normal vol = 86.66 bps, Black vol = 20.57%
+
+  7Y x 4Y (I=7, J=11): S0=4.3186%, 1 strikes
+    ATM normal vol = 86.22 bps, Black vol = 20.20%
+
+  8Y x 1Y (I=8, J=9): S0=4.2711%, 1 strikes
+    ATM normal vol = 86.96 bps, Black vol = 20.65%
+
+  8Y x 2Y (I=8, J=10): S0=4.3334%, 1 strikes
+    ATM normal vol = 86.79 bps, Black vol = 20.30%
+
+  8Y x 3Y (I=8, J=11): S0=4.3842%, 1 strikes
+    ATM normal vol = 86.20 bps, Black vol = 19.92%
+
+  9Y x 1Y (I=9, J=10): S0=4.3985%, 1 strikes
+    ATM normal vol = 86.48 bps, Black vol = 19.96%
+
+  9Y x 2Y (I=9, J=11): S0=4.4445%, 1 strikes
+    ATM normal vol = 86.00 bps, Black vol = 19.63%
+
+  10Y x 1Y (I=10, J=11): S0=4.4926%, 9 strikes
+    ATM normal vol = 85.98 bps, Black vol = 19.44%
+
+============================================================
+Date: 2025-12-10
+============================================================
+
+Discount factors:
+  P(T_0) = 1.00000000
+  P(T_1) = 0.96616024
+  P(T_2) = 0.93599992
+  P(T_3) = 0.90546718
+  P(T_4) = 0.87464442
+  P(T_5) = 0.84361696
+  P(T_6) = 0.81237601
+  P(T_7) = 0.78116292
+  P(T_8) = 0.75019502
+  P(T_9) = 0.71954241
+  P(T_10) = 0.68929291
+  P(T_11) = 0.65966746
+
+Forward term rates:
+  R_1 = 3.5025%
+  R_2 = 3.2223%
+  R_3 = 3.3720%
+  R_4 = 3.5240%
+  R_5 = 3.6779%
+  R_6 = 3.8456%
+  R_7 = 3.9957%
+  R_8 = 4.1280%
+  R_9 = 4.2600%
+  R_10 = 4.3885%
+  R_11 = 4.4910%
+
+Swaptions (55 total):
+
+  1Y x 1Y (I=1, J=2): S0=3.2223%, 9 strikes
+    ATM normal vol = 81.17 bps, Black vol = 25.26%
+
+  1Y x 2Y (I=1, J=3): S0=3.2959%, 9 strikes
+    ATM normal vol = 84.02 bps, Black vol = 25.56%
+
+  1Y x 3Y (I=1, J=4): S0=3.3694%, 9 strikes
+    ATM normal vol = 84.39 bps, Black vol = 25.11%
+
+  1Y x 4Y (I=1, J=5): S0=3.4425%, 1 strikes
+    ATM normal vol = 84.41 bps, Black vol = 24.58%
+
+  1Y x 5Y (I=1, J=6): S0=3.5174%, 9 strikes
+    ATM normal vol = 84.34 bps, Black vol = 24.04%
+
+  1Y x 6Y (I=1, J=7): S0=3.5899%, 1 strikes
+    ATM normal vol = 83.66 bps, Black vol = 23.36%
+
+  1Y x 7Y (I=1, J=8): S0=3.6583%, 9 strikes
+    ATM normal vol = 83.46 bps, Black vol = 22.86%
+
+  1Y x 8Y (I=1, J=9): S0=3.7237%, 1 strikes
+    ATM normal vol = 83.08 bps, Black vol = 22.36%
+
+  1Y x 9Y (I=1, J=10): S0=3.7863%, 1 strikes
+    ATM normal vol = 82.77 bps, Black vol = 21.90%
+
+  1Y x 10Y (I=1, J=11): S0=3.8446%, 9 strikes
+    ATM normal vol = 82.53 bps, Black vol = 21.51%
+
+  2Y x 1Y (I=2, J=3): S0=3.3720%, 1 strikes
+    ATM normal vol = 85.66 bps, Black vol = 25.54%
+
+  2Y x 2Y (I=2, J=4): S0=3.4467%, 1 strikes
+    ATM normal vol = 85.77 bps, Black vol = 25.01%
+
+  2Y x 3Y (I=2, J=5): S0=3.5211%, 1 strikes
+    ATM normal vol = 86.23 bps, Black vol = 24.61%
+
+  2Y x 4Y (I=2, J=6): S0=3.5978%, 1 strikes
+    ATM normal vol = 85.87 bps, Black vol = 23.98%
+
+  2Y x 5Y (I=2, J=7): S0=3.6715%, 1 strikes
+    ATM normal vol = 85.48 bps, Black vol = 23.39%
+
+  2Y x 6Y (I=2, J=8): S0=3.7404%, 1 strikes
+    ATM normal vol = 84.94 bps, Black vol = 22.81%
+
+  2Y x 7Y (I=2, J=9): S0=3.8062%, 1 strikes
+    ATM normal vol = 84.46 bps, Black vol = 22.28%
+
+  2Y x 8Y (I=2, J=10): S0=3.8691%, 1 strikes
+    ATM normal vol = 84.16 bps, Black vol = 21.84%
+
+  2Y x 9Y (I=2, J=11): S0=3.9274%, 1 strikes
+    ATM normal vol = 83.84 bps, Black vol = 21.43%
+
+  3Y x 1Y (I=3, J=4): S0=3.5240%, 9 strikes
+    ATM normal vol = 87.33 bps, Black vol = 24.97%
+
+  3Y x 2Y (I=3, J=5): S0=3.5996%, 9 strikes
+    ATM normal vol = 86.94 bps, Black vol = 24.33%
+
+  3Y x 3Y (I=3, J=6): S0=3.6786%, 9 strikes
+    ATM normal vol = 86.75 bps, Black vol = 23.75%
+
+  3Y x 4Y (I=3, J=7): S0=3.7534%, 1 strikes
+    ATM normal vol = 86.57 bps, Black vol = 23.22%
+
+  3Y x 5Y (I=3, J=8): S0=3.8226%, 9 strikes
+    ATM normal vol = 86.32 bps, Black vol = 22.73%
+
+  3Y x 6Y (I=3, J=9): S0=3.8884%, 1 strikes
+    ATM normal vol = 85.66 bps, Black vol = 22.17%
+
+  3Y x 7Y (I=3, J=10): S0=3.9514%, 9 strikes
+    ATM normal vol = 85.23 bps, Black vol = 21.70%
+
+  3Y x 8Y (I=3, J=11): S0=4.0095%, 1 strikes
+    ATM normal vol = 84.83 bps, Black vol = 21.28%
+
+  4Y x 1Y (I=4, J=5): S0=3.6779%, 1 strikes
+    ATM normal vol = 87.95 bps, Black vol = 24.15%
+
+  4Y x 2Y (I=4, J=6): S0=3.7602%, 1 strikes
+    ATM normal vol = 87.28 bps, Black vol = 23.42%
+
+  4Y x 3Y (I=4, J=7): S0=3.8357%, 1 strikes
+    ATM normal vol = 86.98 bps, Black vol = 22.87%
+
+  4Y x 4Y (I=4, J=8): S0=3.9045%, 1 strikes
+    ATM normal vol = 86.74 bps, Black vol = 22.40%
+
+  4Y x 5Y (I=4, J=9): S0=3.9700%, 1 strikes
+    ATM normal vol = 86.50 bps, Black vol = 21.96%
+
+  4Y x 6Y (I=4, J=10): S0=4.0327%, 1 strikes
+    ATM normal vol = 85.93 bps, Black vol = 21.47%
+
+  4Y x 7Y (I=4, J=11): S0=4.0902%, 1 strikes
+    ATM normal vol = 85.42 bps, Black vol = 21.04%
+
+  5Y x 1Y (I=5, J=6): S0=3.8456%, 9 strikes
+    ATM normal vol = 88.01 bps, Black vol = 23.14%
+
+  5Y x 2Y (I=5, J=7): S0=3.9192%, 9 strikes
+    ATM normal vol = 87.46 bps, Black vol = 22.55%
+
+  5Y x 3Y (I=5, J=8): S0=3.9860%, 9 strikes
+    ATM normal vol = 87.02 bps, Black vol = 22.05%
+
+  5Y x 4Y (I=5, J=9): S0=4.0504%, 1 strikes
+    ATM normal vol = 86.73 bps, Black vol = 21.62%
+
+  5Y x 5Y (I=5, J=10): S0=4.1125%, 9 strikes
+    ATM normal vol = 86.48 bps, Black vol = 21.23%
+
+  5Y x 6Y (I=5, J=11): S0=4.1691%, 1 strikes
+    ATM normal vol = 85.95 bps, Black vol = 20.80%
+
+  6Y x 1Y (I=6, J=7): S0=3.9957%, 1 strikes
+    ATM normal vol = 87.72 bps, Black vol = 22.22%
+
+  6Y x 2Y (I=6, J=8): S0=4.0605%, 1 strikes
+    ATM normal vol = 87.44 bps, Black vol = 21.79%
+
+  6Y x 3Y (I=6, J=9): S0=4.1243%, 1 strikes
+    ATM normal vol = 86.89 bps, Black vol = 21.31%
+
+  6Y x 4Y (I=6, J=10): S0=4.1862%, 1 strikes
+    ATM normal vol = 86.49 bps, Black vol = 20.89%
+
+  6Y x 5Y (I=6, J=11): S0=4.2421%, 1 strikes
+    ATM normal vol = 86.29 bps, Black vol = 20.56%
+
+  7Y x 1Y (I=7, J=8): S0=4.1280%, 9 strikes
+    ATM normal vol = 87.49 bps, Black vol = 21.48%
+
+  7Y x 2Y (I=7, J=9): S0=4.1926%, 9 strikes
+    ATM normal vol = 87.18 bps, Black vol = 21.06%
+
+  7Y x 3Y (I=7, J=10): S0=4.2552%, 9 strikes
+    ATM normal vol = 86.62 bps, Black vol = 20.61%
+
+  7Y x 4Y (I=7, J=11): S0=4.3103%, 1 strikes
+    ATM normal vol = 86.23 bps, Black vol = 20.24%
+
+  8Y x 1Y (I=8, J=9): S0=4.2600%, 1 strikes
+    ATM normal vol = 86.94 bps, Black vol = 20.70%
+
+  8Y x 2Y (I=8, J=10): S0=4.3229%, 1 strikes
+    ATM normal vol = 86.75 bps, Black vol = 20.34%
+
+  8Y x 3Y (I=8, J=11): S0=4.3765%, 1 strikes
+    ATM normal vol = 86.21 bps, Black vol = 19.96%
+
+  9Y x 1Y (I=9, J=10): S0=4.3885%, 1 strikes
+    ATM normal vol = 86.51 bps, Black vol = 20.01%
+
+  9Y x 2Y (I=9, J=11): S0=4.4386%, 1 strikes
+    ATM normal vol = 86.18 bps, Black vol = 19.70%
+
+  10Y x 1Y (I=10, J=11): S0=4.4910%, 9 strikes
+    ATM normal vol = 86.21 bps, Black vol = 19.50%
+
