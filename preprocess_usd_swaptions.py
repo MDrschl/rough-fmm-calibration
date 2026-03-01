@@ -58,7 +58,7 @@ THETA = 1.0
 OTM_OFFSETS_BPS = [-200, -100, -50, -25, 25, 50, 100, 200]
 
 # Data directory (relative to this script)
-DATA_DIR = Path("data")
+DATA_DIR = Path("dataUSD")
 
 # Date mapping: (filename_stem, sheet_prefix) -> ISO date string
 # Sheet prefix convention: DDMM  (day-month)
@@ -75,7 +75,7 @@ DATE_MAP = [
 
 # Default calibration / evaluation dates
 DEFAULT_IN_SAMPLE  = "2024-12-09"
-DEFAULT_OUT_SAMPLE = "2025-12-10"
+DEFAULT_OUT_SAMPLE = "2024-12-10"
 
 
 # =============================================================================

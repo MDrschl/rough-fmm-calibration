@@ -1,4 +1,5 @@
 """
+calibration.py
 AMCC Calibration of the Mapped Rough SABR FMM
 ==============================================
 
@@ -8,14 +9,24 @@ all model parameters are optimised *jointly* by backpropagating through
 the Monte Carlo simulator, treating each Euler time step as a layer in
 a deep network with shared weights.
 
-This contrasts with Adachi et al.'s (2025) sequential procedure:
-    Adachi:  H grid scan → κ,ρ₀ formula-based → α ATM match → Σ row-by-row
-    AMCC:    Stage 1 (approximate scheme, H differentiable, all params joint)
-           → Stage 2 (exact Cholesky, H frozen, refine with more paths)
+Two calibration modes are available:
 
-The two-stage split in AMCC is purely computational: the approximate
-scheme makes H differentiable but has O(M²) cost and discretisation bias;
-the exact scheme fixes H but gives unbiased fBm samples in O(M) per path.
+  "hybrid" (recommended):
+      Single-stage calibration using the BLP hybrid simulation scheme
+      (Bennedsen, Lunde & Pakkanen, Finance & Stochastics 2017).
+      ALL parameters — including H — are differentiable throughout.
+      The hybrid scheme handles the fBm singularity with exact Wiener
+      integrals in a small near-field (κ=2 cells), giving accuracy
+      matching full Cholesky with only a tiny (3×3) differentiable
+      Cholesky decomposition.
+
+  "two_stage":
+      Stage 1: approximate Riemann-sum scheme (H differentiable but
+               biased near the singularity)
+      Stage 2: exact Cholesky scheme (H frozen, unbiased fBm samples)
+      The two-stage split is purely computational: the approximate
+      scheme makes H differentiable but has discretisation bias; the
+      exact scheme fixes H but gives unbiased fBm samples.
 
 Usage:
     python amcc_calibration_experiment.py
@@ -32,16 +43,18 @@ import copy
 import numpy as np
 import torch
 
-from amcc_mapped_rough_sabr_fmm import (
+from main import (
     MappedRoughSABRParams,
     load_market_data,
     match_all_alphas,
+    calibrate,
     calibrate_two_stage,
     print_market_summary,
     print_calibration_report,
     print_smile_comparison,
     generate_smile_plot_data,
     compute_effective_params,
+    compute_vbar,
     mc_prices_to_black_iv,
     simulate_swaption,
     compute_swaption_prices,
@@ -60,9 +73,27 @@ CONFIG = {
     "out_sample_date": "2025-12-10",
     "device": "cpu",
 
+    # Calibration mode: "hybrid" (recommended) or "two_stage" (legacy)
+    #   "hybrid"    — single-stage, BLP scheme, H differentiable throughout
+    #   "two_stage" — Stage 1 approx (H free) → Stage 2 exact (H frozen)
+    "mode": "two_stage",
+
+    # Single-stage hybrid settings (used when mode="hybrid")
+    "hybrid": {
+        "iterations": 1200,
+        "lr": 5e-3,
+        "N_paths": 20_000,
+        "M": 50,
+        "kappa": 2,                    # BLP near-field cells (2 recommended)
+        "variance_mode": "full",       # can use full mode from the start
+        "keys": None,                  # None = all swaptions
+        "scheduler": "cosine",         # cosine annealing with warmup
+        "warmup_steps": 50,            # linear warmup before cosine decay
+        "early_stop_patience": 200,    # stop if no improvement for 200 steps
+    },
+
+    # Two-stage legacy settings (used when mode="two_stage")
     # Stage 1: approximate scheme (H differentiable)
-    #   Gonon uses 500 iters × 25k paths for ~4 params.
-    #   We have ~80 params (H, κ, 11 α, 66 angles), so need more room.
     "stage1": {
         "iterations": 800,
         "lr": 5e-3,
@@ -70,18 +101,21 @@ CONFIG = {
         "M": 50,
         "keys": None,           # None = all swaptions
     },
-
     # Stage 2: exact Cholesky scheme (H frozen)
-    #   Previous run: loss still dropping at iter 400.
-    #   Higher lr to close the gap from scheme switch faster.
     "stage2": {
         "iterations": 800,
-        "lr": 3e-3,
+        "lr": 5e-3,
         "N_paths": 30_000,
         "M": 50,
         "variance_mode": "full",
         "keys": None,
+        "scheduler": "cosine",         # cosine annealing with warmup
+        "warmup_steps": 30,            # linear warmup before cosine decay
     },
+
+    # Early stopping (applies to all stages)
+    "early_stop_patience": 150,        # stop if no improvement for N steps
+    "early_stop_tol": 1e-4,           # relative improvement threshold
 
     # Diagnostics
     "diag_N_paths": 100_000,
@@ -171,6 +205,11 @@ def initialise_params(mkt, H_init=0.20, eta_init=2.3):
 
         # --- Pass 1: match 1Y-tenor swaptions (single-rate, analytic) ---
         smile_keys_1y = sorted([k for k in mkt.swaptions.keys() if k[1] == 1])
+        # Formula-based matching is adequate for initialization: it provides
+        # a warm start that the AMCC optimizer corrects within ~50 steps.
+        # MC-based matching fails here because η_init=2.3 makes the variance
+        # process too explosive for reliable simulation at this stage.
+        # (OOS re-matching uses MC because no optimizer is available there.)
         alpha_matched = match_all_alphas(
             mkt, p["H"], p["eta"], p["rho0"], p["rho"],
             alpha_init=p["alpha"],
@@ -222,9 +261,14 @@ def initialise_params(mkt, H_init=0.20, eta_init=2.3):
         print(f"    α     = [{', '.join(f'{a:.4f}' for a in p['alpha'].numpy())}]")
         print(f"    ρ₀    = [{', '.join(f'{r:.3f}' for r in p['rho0'].numpy())}]")
 
-        # ATM check on diverse swaptions
-        check_keys = [(1.0, 1), (1.0, 5), (1.0, 10), (3.0, 1), (5.0, 5), (10.0, 1)]
-        print(f"\n  ATM verification:")
+        # ATM verification: confirm formula matching pinned the 1Y-tenor ATMs.
+        # Note: √v̄ overestimates actual MC ATM at high η due to Jensen's
+        # inequality (E[√V] < √E[V]), so multi-rate and long-dated swaptions
+        # will show large positive diffs.  This is expected — the optimizer
+        # corrects for it during calibration.
+        check_keys = sorted(mkt.swaptions.keys())
+        print(f"\n  ATM verification (formula: σ_ATM ≈ √v̄, "
+              f"overestimates at high η due to Jensen):")
         for key in check_keys:
             if key not in mkt.swaptions:
                 continue
@@ -232,12 +276,22 @@ def initialise_params(mkt, H_init=0.20, eta_init=2.3):
             eff = compute_effective_params(
                 p["alpha"], p["rho0"], p["rho"], swn,
             )
-            atm_model = np.sqrt(eff["v0"].item()) * 100
-            atm_mkt = swn.ivs_black[swn.n_strikes // 2].item() * 100
+            vbar = compute_vbar(
+                T=swn.expiry_years, v0=eff["v0"],
+                H=p["H"], eta=p["eta"], mode="simplified",
+            )
+            atm_model = np.sqrt(vbar.item()) * 100
+            atm_mask = (swn.strikes - swn.S0).abs() < 1e-6
+            atm_mkt = swn.ivs_black[atm_mask][0].item() * 100 if atm_mask.sum() > 0 \
+                else swn.ivs_black[swn.n_strikes // 2].item() * 100
+            sqrt_v0 = np.sqrt(eff["v0"].item()) * 100
+            G = vbar.item() / (eff["v0"].item() + 1e-30)
             exp, ten = key
-            print(f"    {exp:.0f}Y×{ten:.0f}Y: "
-                  f"model √v(0)={atm_model:.2f}%  market ATM={atm_mkt:.2f}%  "
-                  f"diff={atm_model - atm_mkt:+.2f}%")
+            tag = "matched" if ten == 1 else "multi-rate"
+            print(f"    {exp:.0f}Y×{ten:>2.0f}Y: "
+                  f"√v̄={atm_model:.2f}%  mkt={atm_mkt:.2f}%  "
+                  f"diff={atm_model - atm_mkt:+.2f}%  "
+                  f"(√v₀={sqrt_v0:.2f}%, G={G:.3f})  [{tag}]")
 
     return params
 
@@ -272,8 +326,14 @@ def mc_diagnostics(params, mkt, N_paths=100_000, M=100, seed=42):
 # Plotting
 # =============================================================================
 
-def save_plots(params, mkt, step1_history, step2_history, config):
-    """Generate and save diagnostic plots."""
+def save_plots(params, mkt, history, config, history2=None):
+    """
+    Generate and save diagnostic plots.
+
+    Args:
+        history:  list of dicts from calibration (stage 1 or hybrid)
+        history2: optional second history (stage 2, only for two_stage mode)
+    """
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -285,33 +345,45 @@ def save_plots(params, mkt, step1_history, step2_history, config):
     # --- 1. Convergence plot ---
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.5))
 
-    # Loss
-    s1_steps = [r["step"] for r in step1_history]
-    s1_loss = [r["loss"] for r in step1_history]
-    s2_steps = [r["step"] + len(step1_history) for r in step2_history]
-    s2_loss = [r["loss"] for r in step2_history]
+    if history2 is not None:
+        # Two-stage mode: two separate traces
+        s1_steps = [r["step"] for r in history]
+        s1_loss = [r["loss"] for r in history]
+        s2_steps = [r["step"] + len(history) for r in history2]
+        s2_loss = [r["loss"] for r in history2]
 
-    ax1.semilogy(s1_steps, s1_loss, "b-", alpha=0.7, label="Stage 1 (approx)")
-    ax1.semilogy(s2_steps, s2_loss, "r-", alpha=0.7, label="Stage 2 (exact)")
-    ax1.axvline(len(step1_history), color="gray", linestyle="--", alpha=0.5)
+        ax1.semilogy(s1_steps, s1_loss, "b-", alpha=0.7, label="Stage 1 (approx)")
+        ax1.semilogy(s2_steps, s2_loss, "r-", alpha=0.7, label="Stage 2 (exact)")
+        ax1.axvline(len(history), color="gray", linestyle="--", alpha=0.5)
+        ax1.set_title("Calibration convergence (two-stage)")
+        ax1.legend()
+
+        s1_lr = [r["lr"] for r in history]
+        s2_lr = [r["lr"] for r in history2]
+        ax2.semilogy(s1_steps, s1_lr, "b-", alpha=0.7, label="Stage 1")
+        ax2.semilogy(s2_steps, s2_lr, "r-", alpha=0.7, label="Stage 2")
+        ax2.axvline(len(history), color="gray", linestyle="--", alpha=0.5)
+        ax2.legend()
+    else:
+        # Hybrid single-stage: one trace
+        steps = [r["step"] for r in history]
+        losses = [r["loss"] for r in history]
+        lrs = [r["lr"] for r in history]
+
+        ax1.semilogy(steps, losses, "b-", alpha=0.7, label="Hybrid (BLP)")
+        ax1.set_title("Calibration convergence (hybrid)")
+        ax1.legend()
+
+        ax2.semilogy(steps, lrs, "b-", alpha=0.7, label="Hybrid")
+        ax2.legend()
+
     ax1.set_xlabel("Iteration")
     ax1.set_ylabel("Vega-weighted loss")
-    ax1.set_title("Calibration convergence")
-    ax1.legend()
     ax1.grid(True, alpha=0.3)
 
-    # H evolution (Stage 1 only)
-    # Extract H from loss_iv proxy — we need to recompute, or store in history
-    # For now, use learning rate as a proxy for phase
-    s1_lr = [r["lr"] for r in step1_history]
-    s2_lr = [r["lr"] for r in step2_history]
-    ax2.semilogy(s1_steps, s1_lr, "b-", alpha=0.7, label="Stage 1")
-    ax2.semilogy(s2_steps, s2_lr, "r-", alpha=0.7, label="Stage 2")
-    ax2.axvline(len(step1_history), color="gray", linestyle="--", alpha=0.5)
     ax2.set_xlabel("Iteration")
     ax2.set_ylabel("Learning rate")
     ax2.set_title("Learning rate schedule")
-    ax2.legend()
     ax2.grid(True, alpha=0.3)
 
     plt.tight_layout()
@@ -425,31 +497,78 @@ if __name__ == "__main__":
 
     params = initialise_params(mkt, H_init=0.20, eta_init=2.3)
 
-    # ---- AMCC two-stage calibration ----
+    # ---- AMCC calibration ----
     print("\n" + "#" * 60)
     print("# AMCC CALIBRATION")
     print("#" * 60)
 
-    result = calibrate_two_stage(
-        params, mkt,
-        # Stage 1
-        stage1_iterations=cfg["stage1"]["iterations"],
-        stage1_lr=cfg["stage1"]["lr"],
-        stage1_N_paths=cfg["stage1"]["N_paths"],
-        stage1_M=cfg["stage1"]["M"],
-        stage1_keys=cfg["stage1"]["keys"],
-        # Stage 2
-        stage2_iterations=cfg["stage2"]["iterations"],
-        stage2_lr=cfg["stage2"]["lr"],
-        stage2_N_paths=cfg["stage2"]["N_paths"],
-        stage2_M=cfg["stage2"]["M"],
-        stage2_variance_mode=cfg["stage2"]["variance_mode"],
-        stage2_keys=cfg["stage2"]["keys"],
-        # Common
-        use_crn=True,
-        crn_seed=cfg["crn_seed"],
-        log_every=20,
-    )
+    if cfg["mode"] == "hybrid":
+        # ---- Single-stage hybrid (BLP scheme, H differentiable) ----
+        hcfg = cfg["hybrid"]
+        print(f"\nMode: hybrid (BLP κ={hcfg['kappa']})")
+        print(f"  {hcfg['iterations']} iterations, {hcfg['N_paths']:,} paths, "
+              f"{hcfg['M']} steps, lr={hcfg['lr']}")
+
+        params.unfix_H()
+        result = calibrate(
+            params, mkt,
+            n_iterations=hcfg["iterations"],
+            lr=hcfg["lr"],
+            N_paths=hcfg["N_paths"],
+            M=hcfg["M"],
+            scheme="hybrid",
+            hybrid_kappa=hcfg["kappa"],
+            variance_curve_mode=hcfg["variance_mode"],
+            use_crn=True,
+            crn_seed=cfg["crn_seed"],
+            log_every=20,
+            swaption_keys=hcfg["keys"],
+            scheduler_type=hcfg.get("scheduler", "cosine"),
+            warmup_steps=hcfg.get("warmup_steps", 50),
+            early_stop_patience=hcfg.get("early_stop_patience",
+                                         cfg.get("early_stop_patience")),
+            early_stop_tol=cfg.get("early_stop_tol", 1e-4),
+        )
+
+        # Load best parameters
+        if result["best_state"] is not None:
+            params.load_state_dict(result["best_state"])
+
+        with torch.no_grad():
+            H_calibrated = params.get_H().item()
+        print(f"\nHybrid calibration complete. H = {H_calibrated:.4f}")
+
+    else:
+        # ---- Legacy two-stage calibration ----
+        print(f"\nMode: two_stage")
+
+        result = calibrate_two_stage(
+            params, mkt,
+            # Stage 1
+            stage1_iterations=cfg["stage1"]["iterations"],
+            stage1_lr=cfg["stage1"]["lr"],
+            stage1_N_paths=cfg["stage1"]["N_paths"],
+            stage1_M=cfg["stage1"]["M"],
+            stage1_keys=cfg["stage1"]["keys"],
+            # Stage 2
+            stage2_iterations=cfg["stage2"]["iterations"],
+            stage2_lr=cfg["stage2"]["lr"],
+            stage2_N_paths=cfg["stage2"]["N_paths"],
+            stage2_M=cfg["stage2"]["M"],
+            stage2_variance_mode=cfg["stage2"]["variance_mode"],
+            stage2_keys=cfg["stage2"]["keys"],
+            stage2_scheduler=cfg["stage2"].get("scheduler", "cosine"),
+            stage2_warmup_steps=cfg["stage2"].get("warmup_steps", 30),
+            # Common
+            use_crn=True,
+            crn_seed=cfg["crn_seed"],
+            log_every=20,
+            early_stop_patience=cfg.get("early_stop_patience", 150),
+            early_stop_tol=cfg.get("early_stop_tol", 1e-4),
+        )
+
+        with torch.no_grad():
+            H_calibrated = params.get_H().item()
 
     # ---- Calibrated parameters ----
     print("\n" + "#" * 60)
@@ -515,9 +634,11 @@ if __name__ == "__main__":
 
     save_plots(
         params, mkt,
-        result["stage1"]["history"],
-        result["stage2"]["history"],
-        cfg,
+        history=result["history"] if cfg["mode"] == "hybrid"
+                else result["stage1"]["history"],
+        config=cfg,
+        history2=None if cfg["mode"] == "hybrid"
+                 else result["stage2"]["history"],
     )
 
     # ==================================================================
@@ -537,12 +658,14 @@ if __name__ == "__main__":
     )
     print_market_summary(mkt_oos)
 
-    # Re-match α to the new curve (the rate levels have changed,
-    # so the ATM vols need α re-pinning to be meaningful)
-    # NOTE: we keep the *same* calibrated (H, κ, ρ₀, Σ) and only
-    # re-pin α to the new ATM levels.  This tests whether the
-    # *shape* parameters generalise out-of-sample.
-    print("\n--- Re-matching α to out-of-sample ATM levels ---")
+    # Re-match α to the new curve via MC-based root-finding (Adachi §6.2).
+    # We keep the *same* calibrated (H, η, ρ₀, Σ) and only re-pin α to the
+    # new ATM levels.  This tests whether the *shape* parameters generalise.
+    #
+    # The deterministic formula σ_ATM = √v̄(T) ignores Jensen's inequality
+    # from stochastic variance, producing ~500bp ATM errors at η ≈ 1.7.
+    # MC-based Brent solves for the α that makes the *simulated* ATM match.
+    print("\n--- Re-matching α to out-of-sample ATM levels (MC-based) ---")
     params_oos = copy.deepcopy(params)
     with torch.no_grad():
         p_oos = params_oos()
@@ -551,15 +674,25 @@ if __name__ == "__main__":
             mkt_oos, p_oos["H"], p_oos["eta"], p_oos["rho0"], p_oos["rho"],
             alpha_init=p_oos["alpha"],
             smile_keys=smile_keys_oos,
-            variance_curve_mode="simplified",
-            method="formula",
+            variance_curve_mode="full",
+            method="mc",
         )
+
+        # Identify matched indices and interpolate unmatched ones
+        # (mirroring the initialise_params logic for consistency)
+        matched_indices_oos = []
         for key in smile_keys_oos:
             swn = mkt_oos.swaptions[key]
             if swn.J - swn.I == 1:
-                j = swn.I
-                a = alpha_oos[j].item()
-                params_oos.alpha_tilde.data[j] = a + np.log(1.0 - np.exp(-a))
+                matched_indices_oos.append(swn.I)
+
+        if matched_indices_oos:
+            alpha_oos = _interpolate_alpha(alpha_oos, matched_indices_oos)
+
+        # Write all α values back using the numerically stable inverse
+        for j in range(mkt_oos.N):
+            a = alpha_oos[j].item()
+            params_oos.alpha_tilde.data[j] = _softplus_inv(a)
 
     # MC diagnostics on out-of-sample data
     print(f"\n--- Out-of-sample MC report ({cfg['out_sample_date']}) ---")
@@ -588,6 +721,7 @@ if __name__ == "__main__":
 
     results = {
         "config": cfg,
+        "mode": cfg["mode"],
         "params_state_dict": params.state_dict(),
         "H": p["H"].item(),
         "eta": p["eta"].item(),
@@ -595,13 +729,16 @@ if __name__ == "__main__":
         "rho0": p["rho0"].numpy(),
         "rho": p["rho"].numpy(),
         "Sigma": p["Sigma"].numpy(),
-        "stage1_history": result["stage1"]["history"],
-        "stage2_history": result["stage2"]["history"],
-        "H_calibrated": result["H_calibrated"],
+        "H_calibrated": H_calibrated,
         "in_sample_date": cfg["in_sample_date"],
         "out_sample_date": cfg["out_sample_date"],
         "elapsed_seconds": elapsed,
     }
+    if cfg["mode"] == "hybrid":
+        results["history"] = result["history"]
+    else:
+        results["stage1_history"] = result["stage1"]["history"]
+        results["stage2_history"] = result["stage2"]["history"]
     torch.save(results, "amcc_calibration_results.pt")
     print(f"\nResults saved to amcc_calibration_results.pt")
     print(f"Total elapsed time: {elapsed:.1f}s ({elapsed/60:.1f} min)")
