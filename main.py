@@ -2099,6 +2099,8 @@ def compute_total_loss(
             loss:          scalar tensor — total vega-weighted loss (for backprop)
             loss_iv:       scalar — total IV-space loss (for monitoring, detached)
                            (0.0 if compute_diagnostics=False)
+            n_valid_strikes: int — number of strikes with successful IV inversion
+                           (0 if compute_diagnostics=False)
             per_swaption:  dict (key → {loss, loss_iv, mc_prices, model_ivs})
                            (model_ivs and loss_iv omitted if compute_diagnostics=False)
     """
@@ -2106,6 +2108,7 @@ def compute_total_loss(
 
     total_loss = torch.tensor(0.0, dtype=torch.float64, device=params._device)
     total_loss_iv = 0.0
+    n_valid_strikes = 0
     per_swaption = {}
 
     for key in keys:
@@ -2142,12 +2145,14 @@ def compute_total_loss(
         if compute_diagnostics:
             model_ivs = mc_prices_to_black_iv(mc_prices.detach(), swn)
             valid = ~torch.isnan(model_ivs)
-            if valid.sum() > 0:
+            n_valid = int(valid.sum().item())
+            if n_valid > 0:
                 diff = model_ivs[valid] - swn.ivs_black[valid]
                 loss_iv_val = (diff ** 2).sum().item()
             else:
                 loss_iv_val = 0.0
             total_loss_iv += loss_iv_val
+            n_valid_strikes += n_valid
             record["loss_iv"] = loss_iv_val
             record["model_ivs"] = model_ivs
 
@@ -2156,6 +2161,7 @@ def compute_total_loss(
     return {
         "loss": total_loss,
         "loss_iv": total_loss_iv,
+        "n_valid_strikes": n_valid_strikes,
         "per_swaption": per_swaption,
     }
 
@@ -2345,12 +2351,8 @@ def calibrate(
                 H_val = p["H"].item()
                 eta_val = p["eta"].item()
                 kappa_adachi = eta_val * np.sqrt(2.0 * H_val)
-            n_strikes_total = sum(
-                mkt.swaptions[k].n_strikes
-                for k in (swaption_keys if swaption_keys else mkt.swaptions)
-            )
-            if result["loss_iv"] > 0:
-                rmse_iv = np.sqrt(result["loss_iv"] / max(1, n_strikes_total)) * 100
+            if result["loss_iv"] > 0 and result["n_valid_strikes"] > 0:
+                rmse_iv = np.sqrt(result["loss_iv"] / result["n_valid_strikes"]) * 100
                 rmse_str = f"RMSE_IV={rmse_iv:.3f}%"
             else:
                 rmse_str = "RMSE_IV=n/a"
