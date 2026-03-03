@@ -1,12 +1,20 @@
 """
 calibration_roughness.py
-Roughness Ablation Study: H < ½ vs H = ½
-==========================================
+Roughness Ablation Study: H < 1/2 vs H = 1/2
+==============================================
 
 This script answers the question: how much does roughness contribute to
-calibration quality?  It calibrates the Mapped Rough SABR FMM twice —
+calibration quality?  It calibrates the Mapped Rough SABR FMM twice --
 once with H free (the full rough model) and once with H pinned at 0.5
-(classical SABR) — then compares the fits on the same in-sample data.
+(the Markovian special case) -- then compares the fits on the same
+in-sample data.
+
+When H = 1/2, the fractional Brownian motion degenerates to standard
+Brownian motion.  The variance process becomes Markovian (no memory,
+no path dependence), but the full multi-factor FMM structure survives:
+N forward rates, the correlation matrix rho_{ij}, the rho_0 vector,
+and the alpha term structure.  The only thing lost is the power-law
+kernel that creates long-range dependence in variance.
 
 The comparison breaks down the improvement (or lack thereof) by:
   - per-swaption RMSE
@@ -20,7 +28,7 @@ it justifies the added model complexity.  If it buys only 5 bp, the
 multi-factor correlation structure is doing the heavy lifting.
 
 Usage:
-    python ablation_roughness.py
+    python calibration_roughness.py
 
 Requires:
     - main.py (model and infrastructure)
@@ -71,7 +79,7 @@ CONFIG = {
     # Since H is fixed, we skip Stage 1 (approximate scheme for H gradients)
     # and go directly to exact Cholesky calibration.
     "h05": {
-        "eta_init": 1.5,          # starting η (= κ when H=0.5)
+        "eta_init": 1.5,          # starting eta (= kappa when H=0.5)
         "iterations": 1200,       # more iterations to compensate for lost DOF
         "lr": 5e-3,
         "N_paths": 30_000,
@@ -83,7 +91,7 @@ CONFIG = {
         "early_stop_patience": 200,
     },
 
-    # Diagnostics (same for both models — apples-to-apples)
+    # Diagnostics (same for both models -- apples-to-apples)
     "diag_N_paths": 100_000,
     "diag_M": 100,
 
@@ -105,7 +113,7 @@ def _softplus_inv(a):
 
 
 def _interpolate_alpha(alpha, matched_indices):
-    """Fill unmatched α by linear interpolation, flat extrapolation."""
+    """Fill unmatched alpha by linear interpolation, flat extrapolation."""
     alpha = alpha.clone()
     N = alpha.shape[0]
     anchors = sorted(matched_indices)
@@ -135,9 +143,10 @@ def initialise_h05(mkt, eta_init=1.5):
     Create parameter module with H fixed at 0.5.
 
     When H = 0.5, the rough Bergomi variance process degenerates to
-    geometric Brownian motion — this is the classical SABR model.
-    The deterministic ATM formula σ_ATM = α√G is more accurate here
-    than at H = 0.2, because the variance-of-variance growth is smoother.
+    geometric Brownian motion -- this is the Markovian special case.
+    The deterministic ATM formula sigma_ATM = alpha * sqrt(G) is more
+    accurate here than at H = 0.2, because the variance-of-variance
+    growth is smoother.
     """
     params = MappedRoughSABRParams(N=mkt.N, device=mkt.device)
     params.set_H(0.5)
@@ -147,7 +156,7 @@ def initialise_h05(mkt, eta_init=1.5):
     with torch.no_grad():
         p = params()
 
-        # Match α analytically on 1Y-tenor swaptions
+        # Match alpha analytically on 1Y-tenor swaptions
         smile_keys_1y = sorted([k for k in mkt.swaptions.keys() if k[1] == 1])
         alpha_matched = match_all_alphas(
             mkt, p["H"], p["eta"], p["rho0"], p["rho"],
@@ -174,8 +183,8 @@ def initialise_h05(mkt, eta_init=1.5):
         p = params()
         print(f"\n  H=0.5 initialisation:")
         print(f"    H     = {p['H'].item():.4f}  [FIXED]")
-        print(f"    η     = {p['eta'].item():.4f}  (= κ when H=0.5)")
-        print(f"    α     = [{', '.join(f'{a:.4f}' for a in p['alpha'].numpy())}]")
+        print(f"    eta   = {p['eta'].item():.4f}  (= kappa when H=0.5)")
+        print(f"    alpha = [{', '.join(f'{a:.4f}' for a in p['alpha'].numpy())}]")
 
     return params
 
@@ -187,8 +196,8 @@ def initialise_h05(mkt, eta_init=1.5):
 def run_diagnostics(params, mkt, label="", N_paths=100_000, M=100, seed=42):
     """Run MC diagnostics and return the report dict."""
     print(f"\n{'=' * 72}")
-    print(f"MC DIAGNOSTICS — {label}")
-    print(f"({'=' * 72})")
+    print(f"MC DIAGNOSTICS -- {label}")
+    print(f"{'=' * 72}")
 
     report = print_calibration_report(
         params, mkt,
@@ -223,12 +232,12 @@ def compare_reports(report_rough, report_h05, mkt):
     # 1. Per-swaption RMSE comparison
     # ================================================================
     print("\n" + "=" * 100)
-    print("PER-SWAPTION COMPARISON: Rough (H free) vs Classical (H = 0.5)")
+    print("PER-SWAPTION COMPARISON: Rough (H free) vs Markovian (H = 0.5)")
     print("=" * 100)
 
     print(f"\n  {'Swaption':>10s}  {'Rough':>8s}  {'H=0.5':>8s}  "
-          f"{'Δ RMSE':>8s}  {'Rough':>8s}  {'H=0.5':>8s}  "
-          f"{'Δ ATM':>8s}  {'Winner':>8s}")
+          f"{'D RMSE':>8s}  {'Rough':>8s}  {'H=0.5':>8s}  "
+          f"{'D ATM':>8s}  {'Winner':>8s}")
     print(f"  {'':>10s}  {'RMSE':>8s}  {'RMSE':>8s}  "
           f"{'(bp)':>8s}  {'ATM':>8s}  {'ATM':>8s}  "
           f"{'(bp)':>8s}  {'':>8s}")
@@ -238,11 +247,11 @@ def compare_reports(report_rough, report_h05, mkt):
     by_expiry = {}
     by_tenor = {}
     moneyness_buckets = {
-        "deep_ITM": {"rough": [], "h05": []},     # offset ≤ -100bp
-        "ITM":      {"rough": [], "h05": []},      # -100bp < offset ≤ -25bp
-        "ATM":      {"rough": [], "h05": []},      # |offset| < 25bp
-        "OTM":      {"rough": [], "h05": []},      # 25bp ≤ offset < 100bp
-        "deep_OTM": {"rough": [], "h05": []},      # offset ≥ 100bp
+        "deep_ITM": {"rough": [], "h05": []},
+        "ITM":      {"rough": [], "h05": []},
+        "ATM":      {"rough": [], "h05": []},
+        "OTM":      {"rough": [], "h05": []},
+        "deep_OTM": {"rough": [], "h05": []},
     }
     wing_data = {
         "left_rough": [], "left_h05": [],
@@ -286,7 +295,7 @@ def compare_reports(report_rough, report_h05, mkt):
         else:
             h05_wins += 1
 
-        print(f"  {expiry:.0f}Y×{tenor:.0f}Y  "
+        print(f"  {expiry:.0f}Y x {tenor:.0f}Y  "
               f"{rmse_r:8.1f}  {rmse_h:8.1f}  {delta_rmse:+8.1f}  "
               f"{atm_r:+8.1f}  {atm_h:+8.1f}  {delta_atm:+8.1f}  "
               f"{winner:>8s}")
@@ -319,7 +328,6 @@ def compare_reports(report_rough, report_h05, mkt):
             e_r = res_r["iv_errors"][i_s].item() * 10000
             e_h = res_h["iv_errors"][i_s].item() * 10000
 
-            # Moneyness bucket
             if off <= -100:
                 bucket = "deep_ITM"
             elif off <= -25:
@@ -333,7 +341,6 @@ def compare_reports(report_rough, report_h05, mkt):
             moneyness_buckets[bucket]["rough"].append(e_r ** 2)
             moneyness_buckets[bucket]["h05"].append(e_h ** 2)
 
-            # Wing analysis
             if off < -ATM_TOL * 10000:
                 wing_data["left_rough"].append(e_r)
                 wing_data["left_h05"].append(e_h)
@@ -357,7 +364,7 @@ def compare_reports(report_rough, report_h05, mkt):
     # ================================================================
     print(f"\n  {'BREAKDOWN BY EXPIRY':=^70}")
     print(f"  {'Expiry':>8s}  {'Rough':>8s}  {'H=0.5':>8s}  "
-          f"{'Δ RMSE':>8s}  {'Rel Δ':>8s}")
+          f"{'D RMSE':>8s}  {'Rel D':>8s}")
     print(f"  {'':>8s}  {'RMSE':>8s}  {'RMSE':>8s}  "
           f"{'(bp)':>8s}  {'(%)':>8s}")
     print("  " + "-" * 50)
@@ -376,7 +383,7 @@ def compare_reports(report_rough, report_h05, mkt):
     # ================================================================
     print(f"\n  {'BREAKDOWN BY TENOR':=^70}")
     print(f"  {'Tenor':>8s}  {'Rough':>8s}  {'H=0.5':>8s}  "
-          f"{'Δ RMSE':>8s}  {'Rel Δ':>8s}  {'#swn':>6s}")
+          f"{'D RMSE':>8s}  {'Rel D':>8s}  {'#swn':>6s}")
     print(f"  {'':>8s}  {'RMSE':>8s}  {'RMSE':>8s}  "
           f"{'(bp)':>8s}  {'(%)':>8s}  {'':>6s}")
     print("  " + "-" * 55)
@@ -396,14 +403,14 @@ def compare_reports(report_rough, report_h05, mkt):
     # ================================================================
     print(f"\n  {'BREAKDOWN BY MONEYNESS':=^70}")
     bucket_labels = {
-        "deep_ITM": "Deep ITM (≤-100bp)",
+        "deep_ITM": "Deep ITM (<=-100bp)",
         "ITM":      "ITM (-100 to -25bp)",
-        "ATM":      "ATM (±25bp)",
+        "ATM":      "ATM (+/-25bp)",
         "OTM":      "OTM (+25 to +100bp)",
-        "deep_OTM": "Deep OTM (≥+100bp)",
+        "deep_OTM": "Deep OTM (>=+100bp)",
     }
     print(f"  {'Bucket':>22s}  {'Rough':>8s}  {'H=0.5':>8s}  "
-          f"{'Δ RMSE':>8s}  {'Rel Δ':>8s}  {'#pts':>6s}")
+          f"{'D RMSE':>8s}  {'Rel D':>8s}  {'#pts':>6s}")
     print("  " + "-" * 65)
 
     for bk in ["deep_ITM", "ITM", "ATM", "OTM", "deep_OTM"]:
@@ -422,8 +429,8 @@ def compare_reports(report_rough, report_h05, mkt):
     # 5. Wing asymmetry
     # ================================================================
     print(f"\n  {'WING BIAS COMPARISON':=^70}")
-    for side, label in [("left", "Left wing (K < S₀)"),
-                        ("right", "Right wing (K > S₀)")]:
+    for side, label in [("left", "Left wing (K < S0)"),
+                        ("right", "Right wing (K > S0)")]:
         r_arr = np.array(wing_data[f"{side}_rough"])
         h_arr = np.array(wing_data[f"{side}_h05"])
         if len(r_arr) == 0:
@@ -435,7 +442,7 @@ def compare_reports(report_rough, report_h05, mkt):
         print(f"  {label}:")
         print(f"    Rough:  bias={r_bias:+.1f}bp  RMSE={r_rmse:.1f}bp")
         print(f"    H=0.5:  bias={h_bias:+.1f}bp  RMSE={h_rmse:.1f}bp")
-        print(f"    Δ RMSE: {h_rmse - r_rmse:+.1f}bp")
+        print(f"    D RMSE: {h_rmse - r_rmse:+.1f}bp")
 
     return {
         "total_rmse_rough": total_r,
@@ -478,7 +485,7 @@ def save_comparison_plots(params_rough, params_h05, mkt, cfg):
         squeeze=False,
     )
     fig.suptitle(
-        "Roughness ablation: Rough (H free) vs Classical (H = 0.5)",
+        "Roughness ablation: Rough (H free) vs Markovian (H = 0.5)",
         fontsize=13, fontweight="bold", y=1.01,
     )
 
@@ -490,7 +497,7 @@ def save_comparison_plots(params_rough, params_h05, mkt, cfg):
             for col_idx, key in enumerate(keys_row):
                 ax = axes[row_idx, col_idx]
                 swn = mkt.swaptions[key]
-                offsets = ((swn.strikes - swn.S0) * 10000).numpy()
+                strikes_pct = swn.strikes.numpy() * 100
                 mkt_ivs = swn.ivs_black.numpy() * 100
 
                 # Rough model
@@ -515,12 +522,16 @@ def save_comparison_plots(params_rough, params_h05, mkt, cfg):
                 mc_h = compute_swaption_prices(S_T_h, swn)
                 mod_h = mc_prices_to_black_iv(mc_h, swn).numpy() * 100
 
-                ax.plot(offsets, mkt_ivs, "ko-", ms=3, label="Market")
-                ax.plot(offsets, mod_r, "b^--", ms=3, label=f"Rough")
-                ax.plot(offsets, mod_h, "rs--", ms=3, label="H=0.5")
-                ax.set_title(f"{key[0]:.0f}Y × {key[1]:.0f}Y", fontsize=10)
-                ax.set_xlabel("Offset (bp)", fontsize=8)
+                ax.plot(strikes_pct, mkt_ivs, "o-", color="black",
+                        markersize=3, linewidth=0.5, label="Market")
+                ax.plot(strikes_pct, mod_r, "x-", color="blue",
+                        markersize=4, linewidth=0.5, label="Rough")
+                ax.plot(strikes_pct, mod_h, "x-", color="red",
+                        markersize=4, linewidth=0.5, label="H=0.5")
+                ax.set_title(f"{key[0]:.0f}Y x {key[1]:.0f}Y", fontsize=10)
+                ax.set_xlabel("Strike (%)", fontsize=8)
                 ax.set_ylabel("IV (%)", fontsize=8)
+                ax.set_ylim(bottom=0)
                 ax.tick_params(labelsize=7)
                 ax.grid(True, alpha=0.3)
                 if row_idx == 0 and col_idx == 0:
@@ -530,27 +541,24 @@ def save_comparison_plots(params_rough, params_h05, mkt, cfg):
                 axes[row_idx, col_idx].set_visible(False)
 
     plt.tight_layout()
-    plt.savefig("ablation_roughness_smiles.png", dpi=150)
-    print("Saved: ablation_roughness_smiles.png")
+    plt.savefig("roughness_ablation_smiles.png", dpi=150)
+    print("Saved: roughness_ablation_smiles.png")
     plt.close(fig)
 
     # ---- RMSE bar chart ----
     fig, ax = plt.subplots(figsize=(12, 5))
     all_keys = sorted(set(mkt.swaptions.keys()))
-    labels = [f"{k[0]:.0f}Y×{k[1]:.0f}Y" for k in all_keys]
+    labels = [f"{k[0]:.0f}Y x {k[1]:.0f}Y" for k in all_keys]
 
-    # Compute per-swaption RMSE for both
     rmse_r_list, rmse_h_list = [], []
     for key in all_keys:
         swn = mkt.swaptions[key]
 
-        torch.manual_seed(cfg["crn_seed"])
         res_r = compute_model_smile(
             params_rough, swn, mkt,
             variance_curve_mode="full",
             N_paths=50_000, M=80, seed=cfg["crn_seed"],
         )
-        torch.manual_seed(cfg["crn_seed"])
         res_h = compute_model_smile(
             params_h05, swn, mkt,
             variance_curve_mode="full",
@@ -574,12 +582,12 @@ def save_comparison_plots(params_rough, params_h05, mkt, cfg):
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
     ax.set_ylabel("RMSE (bp)")
-    ax.set_title("Per-swaption RMSE: Rough vs Classical SABR")
+    ax.set_title("Per-swaption RMSE: Rough vs Markovian SABR FMM")
     ax.legend()
     ax.grid(True, alpha=0.3, axis="y")
     plt.tight_layout()
-    plt.savefig("ablation_roughness_rmse_bars.png", dpi=150)
-    print("Saved: ablation_roughness_rmse_bars.png")
+    plt.savefig("roughness_ablation_rmse_bars.png", dpi=150)
+    print("Saved: roughness_ablation_rmse_bars.png")
     plt.close(fig)
 
 
@@ -596,7 +604,7 @@ if __name__ == "__main__":
     # 1. Load market data
     # ----------------------------------------------------------------
     print("=" * 72)
-    print("ROUGHNESS ABLATION STUDY: H < ½  vs  H = ½")
+    print("ROUGHNESS ABLATION STUDY: H < 1/2  vs  H = 1/2")
     print("=" * 72)
 
     print(f"\nLoading market data ({cfg['date']})...")
@@ -632,9 +640,9 @@ if __name__ == "__main__":
             kappa_rough = eta_rough * np.sqrt(2.0 * H_rough)
 
         print(f"  H     = {H_rough:.4f}")
-        print(f"  η     = {eta_rough:.4f}")
-        print(f"  κ     = {kappa_rough:.4f}")
-        print(f"  α     = [{', '.join(f'{a:.4f}' for a in p_r['alpha'].numpy())}]")
+        print(f"  eta   = {eta_rough:.4f}")
+        print(f"  kappa = {kappa_rough:.4f}")
+        print(f"  alpha = [{', '.join(f'{a:.4f}' for a in p_r['alpha'].numpy())}]")
     else:
         print(f"\n  {rough_file} not found.")
         print(f"  Run calibration.py first, then re-run this script.")
@@ -644,7 +652,7 @@ if __name__ == "__main__":
     # 3. Calibrate H=0.5 model
     # ----------------------------------------------------------------
     print("\n" + "#" * 60)
-    print("# MODEL B: Classical SABR (H = 0.5)")
+    print("# MODEL B: Markovian special case (H = 0.5)")
     print("#" * 60)
 
     h05cfg = cfg["h05"]
@@ -681,12 +689,12 @@ if __name__ == "__main__":
         p_h = params_h05()
         print(f"\n  H=0.5 calibration complete.")
         print(f"    H   = {p_h['H'].item():.4f}  [fixed]")
-        print(f"    η   = {p_h['eta'].item():.4f}  (= κ)")
-        print(f"    α   = [{', '.join(f'{a:.4f}' for a in p_h['alpha'].numpy())}]")
-        print(f"    ρ₀  = [{', '.join(f'{r:.3f}' for r in p_h['rho0'].numpy())}]")
+        print(f"    eta = {p_h['eta'].item():.4f}  (= kappa)")
+        print(f"    alpha = [{', '.join(f'{a:.4f}' for a in p_h['alpha'].numpy())}]")
+        print(f"    rho0  = [{', '.join(f'{r:.3f}' for r in p_h['rho0'].numpy())}]")
 
     # ----------------------------------------------------------------
-    # 4. MC diagnostics — both models, same settings
+    # 4. MC diagnostics -- both models, same settings
     # ----------------------------------------------------------------
     print("\n" + "#" * 60)
     print("# DIAGNOSTICS")
@@ -698,7 +706,7 @@ if __name__ == "__main__":
     )
 
     report_h05 = run_diagnostics(
-        params_h05, mkt, label="Classical (H = 0.5)",
+        params_h05, mkt, label="Markovian (H = 0.5)",
         N_paths=cfg["diag_N_paths"], M=cfg["diag_M"], seed=cfg["crn_seed"],
     )
 
@@ -727,7 +735,7 @@ if __name__ == "__main__":
     ]
     for key in representative_keys:
         if key in mkt.swaptions:
-            print(f"\n--- {key[0]:.0f}Y × {key[1]:.0f}Y ---")
+            print(f"\n--- {key[0]:.0f}Y x {key[1]:.0f}Y ---")
             print("  [Rough]")
             print_smile_comparison(
                 params_rough, mkt.swaptions[key], mkt,
@@ -762,26 +770,23 @@ if __name__ == "__main__":
     total_h = comparison["total_rmse_h05"]
     rel_improvement = delta / total_h * 100 if total_h > 0 else 0
 
-    print(f"""
-  Rough model:    H = {H_rough:.4f},  RMSE = {total_r:.1f} bp
-  Classical SABR: H = 0.5000,  RMSE = {total_h:.1f} bp
-
-  Roughness improvement: {delta:+.1f} bp  ({rel_improvement:+.1f}% relative)
-  Rough wins {comparison['rough_wins']}/{comparison['rough_wins'] + comparison['h05_wins']} swaptions
-""")
+    print(f"\n  Rough model:    H = {H_rough:.4f},  RMSE = {total_r:.1f} bp")
+    print(f"  Markovian:      H = 0.5000,  RMSE = {total_h:.1f} bp")
+    print(f"\n  Roughness improvement: {delta:+.1f} bp  ({rel_improvement:+.1f}% relative)")
+    print(f"  Rough wins {comparison['rough_wins']}/{comparison['rough_wins'] + comparison['h05_wins']} swaptions")
 
     if delta > 20:
-        print("  Verdict: Roughness contributes meaningfully (>20bp).")
-        print("  The H < ½ specification captures smile dynamics that")
-        print("  the classical SABR forward market model cannot.")
+        print("\n  Verdict: Roughness contributes meaningfully (>20bp).")
+        print("  The H < 1/2 specification captures smile dynamics that")
+        print("  the Markovian special case of the FMM cannot.")
     elif delta > 5:
-        print("  Verdict: Moderate roughness contribution (5-20bp).")
+        print("\n  Verdict: Moderate roughness contribution (5-20bp).")
         print("  Both roughness and the multi-factor correlation structure")
         print("  contribute, but roughness alone is not transformative.")
     else:
-        print("  Verdict: Roughness contribution is small (<5bp).")
+        print("\n  Verdict: Roughness contribution is small (<5bp).")
         print("  The multi-factor FMM correlation structure does the")
-        print("  heavy lifting; H < ½ is a refinement, not the main driver.")
+        print("  heavy lifting; H < 1/2 is a refinement, not the main driver.")
 
     # ----------------------------------------------------------------
     # 9. Save results
@@ -803,7 +808,7 @@ if __name__ == "__main__":
         "h05_history": result_h05["history"],
         "elapsed_seconds": elapsed,
     }
-    torch.save(results, "ablation_roughness_results.pt")
-    print(f"\nResults saved to ablation_roughness_results.pt")
+    torch.save(results, "roughness_ablation_results.pt")
+    print(f"\nResults saved to roughness_ablation_results.pt")
     print(f"Total elapsed time: {elapsed:.1f}s ({elapsed / 60:.1f} min)")
     print("\nDone.")

@@ -541,15 +541,18 @@ def save_smile_plots(params, mkt, config, filename="amcc_smile_fits.png",
                 mc_prices = compute_swaption_prices(S_T, swn)
                 model_ivs = mc_prices_to_black_iv(mc_prices, swn)
 
-                offsets = ((swn.strikes - swn.S0) * 10000).numpy()
+                strikes_pct = swn.strikes.numpy() * 100
                 mkt_ivs = swn.ivs_black.numpy() * 100
                 mod_ivs = model_ivs.numpy() * 100
 
-                ax.plot(offsets, mkt_ivs, "ko-", markersize=3, label="Market")
-                ax.plot(offsets, mod_ivs, "r^--", markersize=3, label="Model")
+                ax.plot(strikes_pct, mkt_ivs, "o-", color="black",
+                        markersize=3, linewidth=0.5, label="Market")
+                ax.plot(strikes_pct, mod_ivs, "x-", color="red",
+                        markersize=4, linewidth=0.5, label="Model")
                 ax.set_title(f"{key[0]:.0f}Y × {key[1]:.0f}Y", fontsize=10)
-                ax.set_xlabel("Strike offset (bp)", fontsize=8)
+                ax.set_xlabel("Strike (%)", fontsize=8)
                 ax.set_ylabel("IV (%)", fontsize=8)
+                ax.set_ylim(bottom=0)
                 ax.tick_params(labelsize=7)
                 ax.grid(True, alpha=0.3)
                 if row_idx == 0 and col_idx == 0:
