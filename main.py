@@ -572,6 +572,25 @@ class MappedRoughSABRParams(nn.Module):
             # Invert softplus: η = log(1+exp(x)) ⇒ x = log(exp(η)-1)
             self.eta_tilde.fill_(np.log(np.exp(eta_value) - 1.0))
 
+    def set_alpha(self, alpha_values: torch.Tensor):
+        """Set alpha to specific values by inverting softplus."""
+        with torch.no_grad():
+            for j in range(self.N):
+                a = float(alpha_values[j])
+                # Numerically stable inverse softplus
+                if a > 20.0:
+                    self.alpha_tilde.data[j] = a
+                else:
+                    self.alpha_tilde.data[j] = a + np.log(-np.expm1(-a))
+
+    def fix_alpha(self):
+        """Freeze alpha (for level-shape separation calibration)."""
+        self.alpha_tilde.requires_grad_(False)
+
+    def unfix_alpha(self):
+        """Unfreeze alpha (restore standard joint calibration)."""
+        self.alpha_tilde.requires_grad_(True)
+
 
 # =============================================================================
 # Layer 2: Forward variance curves  ξ_j(t)
@@ -1961,6 +1980,96 @@ def match_all_alphas(
 
     return alpha
 
+
+def _interpolate_alpha(alpha, matched_indices):
+    """
+    Fill unmatched alpha by linear interpolation, flat extrapolation.
+
+    Given alpha values that are pinned at matched_indices (from 1Y-tenor
+    ATM matching), fill the remaining indices by linear interpolation
+    between the nearest anchors, with flat extrapolation at the boundaries.
+
+    Args:
+        alpha:           shape (N,) tensor of alpha values
+        matched_indices: list of indices where alpha is pinned
+
+    Returns:
+        alpha: shape (N,) tensor with all values filled
+    """
+    alpha = alpha.clone()
+    N = alpha.shape[0]
+    anchors = sorted(matched_indices)
+
+    for j in range(N):
+        if j in anchors:
+            continue
+        if j <= anchors[0]:
+            alpha[j] = alpha[anchors[0]]
+        elif j >= anchors[-1]:
+            alpha[j] = alpha[anchors[-1]]
+        else:
+            lo = max(a for a in anchors if a < j)
+            hi = min(a for a in anchors if a > j)
+            frac = (j - lo) / (hi - lo)
+            alpha[j] = (1 - frac) * alpha[lo] + frac * alpha[hi]
+
+    return alpha
+
+
+def rematch_alpha_to_atm(
+    params,
+    mkt,
+    variance_curve_mode="simplified",
+):
+    """
+    Re-match alpha to pin model ATM IVs to market ATM IVs.
+
+    This is the core of the level-shape separation:
+    after each optimizer step on shape parameters (eta, rho0, rho),
+    re-solve for the alpha vector that zeroes all ATM errors.
+
+    Procedure:
+        1. Match alpha on 1Y-tenor swaptions (analytic, one rate each)
+        2. Interpolate for rates not covered by 1Y-tenor swaptions
+        3. Write the result back to params.alpha_tilde
+
+    Uses the formula-based (deterministic) matching for speed.
+    The simplified variance curve is accurate enough for ATM level
+    matching and avoids the circular alpha-dependence of the full curve.
+
+    Args:
+        params:              MappedRoughSABRParams (modified in place)
+        mkt:                 MarketData
+        variance_curve_mode: "simplified" recommended for speed
+    """
+    with torch.no_grad():
+        p = params()
+
+        # Step 1: match on 1Y-tenor swaptions
+        smile_keys_1y = sorted([k for k in mkt.swaptions.keys() if k[1] == 1])
+
+        alpha_matched = match_all_alphas(
+            mkt, p["H"], p["eta"], p["rho0"], p["rho"],
+            alpha_init=p["alpha"],
+            smile_keys=smile_keys_1y,
+            variance_curve_mode=variance_curve_mode,
+            method="formula",
+        )
+
+        # Step 2: identify pinned indices and interpolate the rest
+        matched_indices = []
+        for key in smile_keys_1y:
+            if key in mkt.swaptions:
+                swn = mkt.swaptions[key]
+                if swn.J - swn.I == 1:
+                    matched_indices.append(swn.I)
+
+        alpha_final = _interpolate_alpha(alpha_matched, matched_indices)
+
+        # Step 3: write back to params
+        params.set_alpha(alpha_final)
+
+
 # =============================================================================
 # Layer 6: Loss function
 # =============================================================================
@@ -2286,12 +2395,21 @@ def calibrate(
     hybrid_kappa: int = 2,
     early_stop_patience: Optional[int] = None,
     early_stop_tol: float = 1e-4,
+    rematch_alpha: bool = True,
 ) -> dict:
     """
     Layer 7: Run the calibration loop.
 
     Uses Adam optimizer with configurable learning rate scheduling.
     Supports common random numbers (CRN) for variance reduction.
+
+    Level-shape separation (rematch_alpha=True):
+        When enabled, alpha is excluded from the optimizer and re-matched
+        to ATM market IVs after every gradient step on the shape parameters
+        (eta, rho0, rho).  This eliminates the ATM drift problem where the
+        optimizer wastes capacity re-centring smiles after shape updates.
+        Alpha is matched via the deterministic formula (instant) on 1Y-tenor
+        swaptions, with interpolation for unmatched rates.
 
     Args:
         params:              MappedRoughSABRParams (modified in place)
@@ -2323,6 +2441,9 @@ def calibrate(
                              compresses the flat top and accelerates early
                              decay.  Recommended: 1.0 for exploration stages,
                              0.5 for refinement stages.
+        rematch_alpha:       if True, exclude alpha from optimizer and
+                             re-match to ATM after every step.  Separates
+                             level (alpha) from shape (eta, rho0, rho).
         scheme:              "exact", "approx", or "hybrid"
         hybrid_kappa:        near-field cells for hybrid scheme
         early_stop_patience: stop if best loss hasn't improved for this many
@@ -2338,7 +2459,18 @@ def calibrate(
     # Resolve scheme for cache decision
     effective_scheme = scheme if scheme is not None else ("exact" if use_exact else "approx")
 
-    optimizer = torch.optim.Adam(params.parameters(), lr=lr)
+    # When rematch_alpha is True, exclude alpha from the optimizer:
+    # the optimizer only updates shape parameters (eta, rho0, rho, and H
+    # if unfrozen), and alpha is re-matched to ATM after every step.
+    if rematch_alpha:
+        params.fix_alpha()
+        shape_params = [p for p in params.parameters() if p.requires_grad]
+        if not shape_params:
+            raise ValueError("rematch_alpha=True but no shape parameters "
+                             "require gradients. Is H also frozen?")
+        optimizer = torch.optim.Adam(shape_params, lr=lr)
+    else:
+        optimizer = torch.optim.Adam(params.parameters(), lr=lr)
 
     # Build scheduler
     if scheduler_type == "cosine":
@@ -2407,6 +2539,10 @@ def calibrate(
 
         optimizer.step()
 
+        # Re-match alpha to pin ATM levels after shape param update
+        if rematch_alpha:
+            rematch_alpha_to_atm(params, mkt, variance_curve_mode="simplified")
+
         # Step the scheduler (plateau needs the loss value; cosine does not)
         if scheduler_is_plateau:
             scheduler.step(loss.item())
@@ -2458,6 +2594,10 @@ def calibrate(
         if effective_scheme == "exact" and step > 0 and step % 50 == 0:
             cholesky_cache.clear()
 
+    # Restore alpha grad state if we froze it
+    if rematch_alpha:
+        params.unfix_alpha()
+
     return {
         "history": history,
         "best_state": best_state,
@@ -2484,6 +2624,7 @@ def calibrate_two_stage(
     stage2_scheduler: str = "cosine",
     stage2_warmup_steps: int = 20,
     stage2_cosine_power: float = 0.5,
+    stage2_rematch_alpha: bool = False,
     # Common
     use_crn: bool = True,
     crn_seed: int = 42,
@@ -2534,6 +2675,7 @@ def calibrate_two_stage(
         scheduler_type="plateau",       # exploration: reduce lr on stall
         early_stop_patience=early_stop_patience,
         early_stop_tol=early_stop_tol,
+        rematch_alpha=True,             # always separate level from shape
     )
 
     # Load best Stage 1 parameters
@@ -2565,6 +2707,7 @@ def calibrate_two_stage(
         cosine_power=stage2_cosine_power,
         early_stop_patience=early_stop_patience,
         early_stop_tol=early_stop_tol,
+        rematch_alpha=stage2_rematch_alpha,
     )
 
     # Load best Stage 2 parameters
