@@ -1,34 +1,3 @@
-"""
-calibration_cross.py
-AMCC Calibration of the Mapped Rough SABR FMM
-==============================================
-
-Cross-sectional out-of-sample evaluation:
-  - Calibrates on a TRAIN subset of the swaption cube (single date)
-  - Evaluates on a held-out TEST subset (same date, same curve)
-  - No α re-matching for the test set: this tests whether the jointly
-    calibrated (H, η, α, ρ₀, ρ) generalise to swaptions the optimizer
-    never saw
-
-All 1Y-tenor swaptions must remain in the training set because they
-are needed for α initialization (single-rate ATM matching).
-
-Two calibration modes are available:
-
-  "hybrid" (recommended):
-      Single-stage calibration using the BLP hybrid simulation scheme
-      (Bennedsen, Lunde & Pakkanen, Finance & Stochastics 2017).
-      ALL parameters — including H — are differentiable throughout.
-
-  "two_stage":
-      Stage 1: approximate Riemann-sum scheme (H differentiable but
-               biased near the singularity)
-      Stage 2: exact Cholesky scheme (H frozen, unbiased fBm samples)
-
-Usage:
-    python calibration_cross.py
-"""
-
 import sys
 import time
 import numpy as np
@@ -52,48 +21,37 @@ from main import (
     ATM_TOL,
 )
 
-
-# =============================================================================
-# Configuration
-# =============================================================================
-
-# Full cube has 19 swaptions.  We hold out 6 that are spread across
-# expiries and tenors.  All 1Y-tenor (single-rate) swaptions MUST stay
-# in the training set — they are needed for α initialization.
 TEST_KEYS = [
-    (1.0, 3), (1.0, 7),       # short expiry, medium/long tenor
-    (3.0, 2), (3.0, 7),       # medium expiry, short/long tenor
-    (5.0, 3),                  # medium-long expiry
-    (7.0, 2),                  # long expiry
+    (1.0, 3), (1.0, 7),
+    (3.0, 2), (3.0, 7),
+    (5.0, 3),
+    (7.0, 2),
 ]
 
 CONFIG = {
-    # Data
     "data_file": "usd_swaption_data.pkl",
-    "subset": "joint_all_smiles",       # load all 19 swaptions
+    "subset": "joint_all_smiles",
     "date": "2024-12-09",
     "device": "cpu",
 
-    # Train/test split
     "test_keys": TEST_KEYS,
 
-    # Calibration mode: "hybrid" (recommended) or "two_stage" (legacy)
     "mode": "two_stage",
 
-    # Single-stage hybrid settings (used when mode="hybrid")
     "hybrid": {
         "iterations": 1200,
-        "lr": 5e-3,
-        "N_paths": 20_000,
-        "M": 50,
-        "kappa": 2,
+        "lr": 3e-3,
+        "N_paths": 30_000,
+        "M": 100,
+        "kappa": 3,
         "variance_mode": "full",
         "scheduler": "cosine",
         "warmup_steps": 50,
         "early_stop_patience": 200,
+        "H_lr_factor": 0.2,
+        "grad_clip_norm": 1.0,
     },
 
-    # Two-stage legacy settings (used when mode="two_stage")
     "stage1": {
         "iterations": 800,
         "lr": 5e-3,
@@ -111,36 +69,26 @@ CONFIG = {
         "cosine_power": 0.5,
     },
 
-    # Early stopping (applies to all stages)
     "early_stop_patience": 150,
     "early_stop_tol": 1e-4,
 
-    # Diagnostics
     "diag_N_paths": 100_000,
     "diag_M": 100,
+    "diag_scheme": "exact",
+    "diag_hybrid_kappa": 3,
 
-    # Reproducibility
     "crn_seed": 42,
 }
-
-
-# =============================================================================
-# Initialisation
-# =============================================================================
 
 def _softplus_inv(a):
     """Numerically stable inverse of softplus: x = a + log(1 - exp(-a))."""
     a = float(a)
     if a > 20.0:
-        return a  # softplus(x) ≈ x for large x
-    return a + np.log(-np.expm1(-a))  # log(1-exp(-a)) = log(-expm1(-a))
-
+        return a
+    return a + np.log(-np.expm1(-a))
 
 def _interpolate_alpha(alpha, matched_indices):
-    """
-    Fill unmatched α values by linear interpolation with flat extrapolation,
-    following the same scheme Adachi §6.2 uses for ρ₀.
-    """
+    """Fill unmatched α values by linear interpolation with flat extrapolation,"""
     alpha = alpha.clone()
     N = alpha.shape[0]
     anchors = sorted(matched_indices)
@@ -160,15 +108,8 @@ def _interpolate_alpha(alpha, matched_indices):
 
     return alpha
 
-
 def initialise_params(mkt, H_init=0.20, eta_init=2.3):
-    """
-    Create parameter module and warm-start ALL α values.
-
-    Strategy:
-      1. Match α_j analytically for each 1Y-tenor swaption (single-rate).
-      2. Interpolate remaining α values via linear interp + flat extrap.
-    """
+    """Create parameter module and warm-start ALL α values."""
     params = MappedRoughSABRParams(N=mkt.N, device=mkt.device)
     params.set_H(H_init)
     params.set_eta(eta_init)
@@ -247,18 +188,14 @@ def initialise_params(mkt, H_init=0.20, eta_init=2.3):
 
     return params
 
-
-# =============================================================================
-# MC-based diagnostics
-# =============================================================================
-
 def mc_diagnostics(params, mkt, N_paths=100_000, M=100, seed=42,
-                   swaption_keys=None, label=""):
+                   swaption_keys=None, label="",
+                   scheme="exact", hybrid_kappa=2):
     """Full MC-based calibration report with high path count."""
     header = f"MC REPORT — {label}" if label else "MC-BASED CALIBRATION REPORT"
     print("\n" + "=" * 72)
     print(header)
-    print(f"({N_paths:,} paths, {M} time steps)")
+    print(f"({N_paths:,} paths, {M} time steps, scheme={scheme})")
     print("=" * 72)
 
     report = print_calibration_report(
@@ -268,34 +205,14 @@ def mc_diagnostics(params, mkt, N_paths=100_000, M=100, seed=42,
         M=M,
         seed=seed,
         swaption_keys=swaption_keys,
+        scheme=scheme,
+        hybrid_kappa=hybrid_kappa,
     )
 
     return report
 
-
-# =============================================================================
-# Accuracy summary
-# =============================================================================
-
 def print_accuracy_summary(report, mkt, label=""):
-    """
-    Detailed accuracy breakdown from a calibration report.
-
-    Computes per-swaption and aggregated metrics beyond plain RMSE:
-      - RMSE, MAE              (scale of errors)
-      - Mean signed error       (bias: systematic over/under-pricing)
-      - ATM error              (level fit)
-      - Left/right wing bias   (skew fit quality)
-      - Relative price error   (hedging-relevant)
-
-    Aggregates by expiry row, by tenor column, and overall.
-
-    Args:
-        report:  dict returned by mc_diagnostics / print_calibration_report
-                 with 'per_swaption' keyed by (expiry, tenor)
-        mkt:     MarketData (for access to target_prices, vegas, etc.)
-        label:   optional label for the header
-    """
+    """Detailed accuracy breakdown from a calibration report."""
     per_swn = report.get("per_swaption", {})
     if not per_swn:
         print("  No per-swaption results to summarise.")
@@ -306,7 +223,6 @@ def print_accuracy_summary(report, mkt, label=""):
     print(header)
     print("=" * 100)
 
-    # ---- Per-swaption table ----
     print(f"\n{'Swaption':>10s}  {'RMSE':>7s}  {'MAE':>7s}  {'Bias':>7s}  "
           f"{'ATM':>7s}  {'MaxErr':>7s}  {'LWing':>7s}  {'RWing':>7s}  "
           f"{'PrRMSE%':>8s}")
@@ -329,7 +245,7 @@ def print_accuracy_summary(report, mkt, label=""):
             print(f"  {expiry:.0f}Y×{tenor:.0f}Y  {'N/A':>7s}")
             continue
 
-        errors = res["iv_errors"][valid] * 10000  # bp
+        errors = res["iv_errors"][valid] * 10000
         errors_np = errors.numpy()
 
         rmse = np.sqrt((errors_np ** 2).mean())
@@ -337,14 +253,12 @@ def print_accuracy_summary(report, mkt, label=""):
         bias = errors_np.mean()
         max_err = np.max(np.abs(errors_np))
 
-        # ATM error
         atm_mask = (swn.strikes - swn.S0).abs() < ATM_TOL
         if atm_mask.sum() > 0 and not torch.isnan(res["iv_errors"][atm_mask][0]):
             atm_err = res["iv_errors"][atm_mask][0].item() * 10000
         else:
             atm_err = float('nan')
 
-        # Wing analysis: left = K < S0, right = K > S0
         offsets = (swn.strikes - swn.S0)
         left_mask = (offsets < -ATM_TOL) & valid
         right_mask = (offsets > ATM_TOL) & valid
@@ -354,7 +268,6 @@ def print_accuracy_summary(report, mkt, label=""):
         right_bias = (res["iv_errors"][right_mask] * 10000).mean().item() \
             if right_mask.sum() > 0 else float('nan')
 
-        # Relative pricing error: |model_price - mkt_price| / mkt_price
         mkt_prices = swn.target_prices[valid]
         mod_prices = res["model_prices"][valid]
         price_mask = mkt_prices.abs() > 1e-12
@@ -365,7 +278,6 @@ def print_accuracy_summary(report, mkt, label=""):
         else:
             price_rmse_pct = float('nan')
 
-        # Print row
         def _fmt(v, w=7, signed=False):
             if np.isnan(v):
                 return f"{'N/A':>{w}s}"
@@ -377,7 +289,6 @@ def print_accuracy_summary(report, mkt, label=""):
               f"{_fmt(right_bias, signed=True)}  "
               f"{price_rmse_pct:8.2f}%")
 
-        # Accumulate
         sq = (errors_np ** 2).tolist()
         ab = np.abs(errors_np).tolist()
         si = errors_np.tolist()
@@ -395,7 +306,6 @@ def print_accuracy_summary(report, mkt, label=""):
         by_tenor[tenor]["abs"].extend(ab)
         by_tenor[tenor]["signed"].extend(si)
 
-    # ---- Overall ----
     print("-" * 100)
     total_rmse = np.sqrt(np.mean(all_sq)) if all_sq else float('nan')
     total_mae = np.mean(all_abs) if all_abs else float('nan')
@@ -403,7 +313,6 @@ def print_accuracy_summary(report, mkt, label=""):
     print(f"  {'TOTAL':>8s}  {total_rmse:7.1f}  {total_mae:7.1f}  "
           f"{total_bias:+7.1f}")
 
-    # ---- By expiry ----
     print(f"\n  By expiry:")
     for exp in sorted(by_expiry.keys()):
         d = by_expiry[exp]
@@ -413,7 +322,6 @@ def print_accuracy_summary(report, mkt, label=""):
         print(f"    {exp:.0f}Y expiry:  RMSE={r:.1f}bp  MAE={m:.1f}bp  "
               f"Bias={b:+.1f}bp")
 
-    # ---- By tenor ----
     print(f"\n  By tenor:")
     for ten in sorted(by_tenor.keys()):
         d = by_tenor[ten]
@@ -424,19 +332,9 @@ def print_accuracy_summary(report, mkt, label=""):
         print(f"    {ten:.0f}Y tenor:   RMSE={r:.1f}bp  MAE={m:.1f}bp  "
               f"Bias={b:+.1f}bp  ({n_swn} swaptions)")
 
-
-# =============================================================================
-# Plotting
-# =============================================================================
-
 def save_smile_plots(params, mkt, config, filename="amcc_smile_fits.png",
                      suptitle=None, test_keys=None):
-    """
-    Generate smile-fit plots for all swaptions in mkt.
-
-    Reusable for both in-sample and out-of-sample evaluation.
-    Test swaptions (if given) are colour-coded blue with [TEST] tag.
-    """
+    """Generate smile-fit plots for all swaptions in mkt."""
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -465,6 +363,8 @@ def save_smile_plots(params, mkt, config, filename="amcc_smile_fits.png",
         fig.suptitle(suptitle, fontsize=13, fontweight="bold", y=1.01)
 
     cholesky_cache = {}
+    diag_scheme = config.get("diag_scheme", "exact")
+    diag_kappa = config.get("diag_hybrid_kappa", 2)
     with torch.no_grad():
         for row_idx, mat in enumerate(maturities):
             keys = keys_by_maturity[mat]
@@ -476,9 +376,11 @@ def save_smile_plots(params, mkt, config, filename="amcc_smile_fits.png",
                 S_T = simulate_swaption(
                     params, swn, mkt,
                     N_paths=50_000, M=80,
-                    use_exact=True,
+                    use_exact=(diag_scheme == "exact"),
                     variance_curve_mode="full",
                     cholesky_cache=cholesky_cache,
+                    scheme=diag_scheme,
+                    hybrid_kappa=diag_kappa,
                 )
                 mc_prices = compute_swaption_prices(S_T, swn)
                 model_ivs = mc_prices_to_black_iv(mc_prices, swn)
@@ -512,15 +414,9 @@ def save_smile_plots(params, mkt, config, filename="amcc_smile_fits.png",
     print(f"Saved: {filename}")
     plt.close(fig)
 
-
 def save_plots(params, mkt, history, config, history2=None,
                train_keys=None, test_keys=None):
-    """
-    Generate and save calibration diagnostic plots:
-      1. Convergence (loss & learning rate)
-      2. Smile fits (train/test colour-coded)
-      3. Correlation matrix heatmap
-    """
+    """Generate and save calibration diagnostic plots:"""
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -529,7 +425,6 @@ def save_plots(params, mkt, history, config, history2=None,
         print("matplotlib not available, skipping plots")
         return
 
-    # --- 1. Convergence plot ---
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.5))
 
     if history2 is not None:
@@ -576,7 +471,6 @@ def save_plots(params, mkt, history, config, history2=None,
     print("Saved: amcc_convergence.png")
     plt.close(fig)
 
-    # --- 2. Smile fits (train/test colour-coded) ---
     save_smile_plots(
         params, mkt, config,
         filename="amcc_smile_fits.png",
@@ -584,7 +478,6 @@ def save_plots(params, mkt, history, config, history2=None,
         test_keys=test_keys,
     )
 
-    # --- 3. Correlation matrix heatmap ---
     with torch.no_grad():
         p = params()
         Sigma = p["Sigma"].numpy()
@@ -603,19 +496,11 @@ def save_plots(params, mkt, history, config, history2=None,
     print("Saved: amcc_correlation.png")
     plt.close("all")
 
-
-# =============================================================================
-# Main
-# =============================================================================
-
 if __name__ == "__main__":
 
     t_start = time.time()
     cfg = CONFIG
 
-    # ==================================================================
-    # LOAD DATA
-    # ==================================================================
     print("Loading market data...")
     print(f"  Date: {cfg['date']}")
     mkt = load_market_data(
@@ -626,9 +511,6 @@ if __name__ == "__main__":
     )
     print_market_summary(mkt)
 
-    # ==================================================================
-    # TRAIN / TEST SPLIT
-    # ==================================================================
     all_keys = sorted(mkt.swaptions.keys())
     test_keys = [k for k in cfg["test_keys"] if k in mkt.swaptions]
     train_keys = [k for k in all_keys if k not in test_keys]
@@ -643,7 +525,6 @@ if __name__ == "__main__":
     for k in test_keys:
         print(f"    {k[0]:.0f}Y × {k[1]:.0f}Y")
 
-    # Sanity: all 1Y-tenor swaptions must be in training for α init
     test_1y = [k for k in test_keys if k[1] == 1]
     if test_1y:
         print(f"\n  ⚠ WARNING: 1Y-tenor swaptions in test set: {test_1y}")
@@ -653,18 +534,12 @@ if __name__ == "__main__":
             train_keys.append(k)
         train_keys.sort()
 
-    # ==================================================================
-    # INITIALISATION
-    # ==================================================================
     print("\n" + "#" * 60)
     print("# INITIALISATION")
     print("#" * 60)
 
     params = initialise_params(mkt, H_init=0.20, eta_init=2.3)
 
-    # ==================================================================
-    # AMCC CALIBRATION (train set only)
-    # ==================================================================
     print("\n" + "#" * 60)
     print("# AMCC CALIBRATION (train set only)")
     print("#" * 60)
@@ -674,6 +549,8 @@ if __name__ == "__main__":
         print(f"\nMode: hybrid (BLP κ={hcfg['kappa']})")
         print(f"  {hcfg['iterations']} iterations, {hcfg['N_paths']:,} paths, "
               f"{hcfg['M']} steps, lr={hcfg['lr']}")
+        print(f"  H_lr_factor={hcfg.get('H_lr_factor', 1.0)}, "
+              f"grad_clip_norm={hcfg.get('grad_clip_norm', 10.0)}")
         print(f"  Training on {len(train_keys)} swaptions, "
               f"holding out {len(test_keys)}")
 
@@ -696,6 +573,8 @@ if __name__ == "__main__":
             early_stop_patience=hcfg.get("early_stop_patience",
                                          cfg.get("early_stop_patience")),
             early_stop_tol=cfg.get("early_stop_tol", 1e-4),
+            H_lr_factor=hcfg.get("H_lr_factor", 1.0),
+            grad_clip_norm=hcfg.get("grad_clip_norm", 10.0),
         )
 
         if result["best_state"] is not None:
@@ -736,9 +615,6 @@ if __name__ == "__main__":
         with torch.no_grad():
             H_calibrated = params.get_H().item()
 
-    # ==================================================================
-    # CALIBRATED PARAMETERS
-    # ==================================================================
     print("\n" + "#" * 60)
     print("# CALIBRATED PARAMETERS")
     print("#" * 60)
@@ -763,9 +639,6 @@ if __name__ == "__main__":
         np.set_printoptions(precision=3, linewidth=120)
         print(rho)
 
-    # ==================================================================
-    # TRAIN SET MC DIAGNOSTICS
-    # ==================================================================
     print("\n" + "#" * 60)
     print(f"# TRAIN SET MC DIAGNOSTICS ({len(train_keys)} swaptions)")
     print("#" * 60)
@@ -776,12 +649,11 @@ if __name__ == "__main__":
         M=cfg["diag_M"],
         swaption_keys=train_keys,
         label=f"TRAIN ({len(train_keys)} swaptions)",
+        scheme=cfg.get("diag_scheme", "exact"),
+        hybrid_kappa=cfg.get("diag_hybrid_kappa", 2),
     )
     print_accuracy_summary(report_train, mkt, label="TRAIN")
 
-    # ==================================================================
-    # TEST SET MC DIAGNOSTICS (held out — no re-matching)
-    # ==================================================================
     print("\n" + "#" * 60)
     print(f"# TEST SET MC DIAGNOSTICS ({len(test_keys)} swaptions — held out)")
     print("#" * 60)
@@ -792,15 +664,17 @@ if __name__ == "__main__":
         M=cfg["diag_M"],
         swaption_keys=test_keys,
         label=f"TEST ({len(test_keys)} swaptions, held out)",
+        scheme=cfg.get("diag_scheme", "exact"),
+        hybrid_kappa=cfg.get("diag_hybrid_kappa", 2),
     )
     print_accuracy_summary(report_test, mkt, label="TEST (held out)")
 
-    # ==================================================================
-    # SMILE COMPARISONS — TRAIN
-    # ==================================================================
     print("\n" + "#" * 60)
     print("# SMILE COMPARISONS — TRAIN")
     print("#" * 60)
+
+    diag_scheme = cfg.get("diag_scheme", "exact")
+    diag_kappa = cfg.get("diag_hybrid_kappa", 2)
 
     for key in train_keys:
         if key in mkt.swaptions:
@@ -809,11 +683,10 @@ if __name__ == "__main__":
                 variance_curve_mode="full",
                 N_paths=cfg["diag_N_paths"],
                 M=cfg["diag_M"],
+                scheme=diag_scheme,
+                hybrid_kappa=diag_kappa,
             )
 
-    # ==================================================================
-    # SMILE COMPARISONS — TEST (held out)
-    # ==================================================================
     print("\n" + "#" * 60)
     print("# SMILE COMPARISONS — TEST (held out)")
     print("#" * 60)
@@ -825,11 +698,10 @@ if __name__ == "__main__":
                 variance_curve_mode="full",
                 N_paths=cfg["diag_N_paths"],
                 M=cfg["diag_M"],
+                scheme=diag_scheme,
+                hybrid_kappa=diag_kappa,
             )
 
-    # ==================================================================
-    # PLOTS
-    # ==================================================================
     print("\n" + "#" * 60)
     print("# GENERATING PLOTS")
     print("#" * 60)
@@ -845,9 +717,6 @@ if __name__ == "__main__":
         test_keys=test_keys,
     )
 
-    # ==================================================================
-    # SAVE RESULTS
-    # ==================================================================
     elapsed = time.time() - t_start
 
     results = {

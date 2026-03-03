@@ -1,41 +1,3 @@
-"""
-calibration_roughness.py
-Roughness Ablation Study: H < 1/2 vs H = 1/2
-==============================================
-
-This script answers the question: how much does roughness contribute to
-calibration quality?  It calibrates the Mapped Rough SABR FMM twice --
-once with H free (the full rough model) and once with H pinned at 0.5
-(the Markovian special case) -- then compares the fits on the same
-in-sample data.
-
-When H = 1/2, the fractional Brownian motion degenerates to standard
-Brownian motion.  The variance process becomes Markovian (no memory,
-no path dependence), but the full multi-factor FMM structure survives:
-N forward rates, the correlation matrix rho_{ij}, the rho_0 vector,
-and the alpha term structure.  The only thing lost is the power-law
-kernel that creates long-range dependence in variance.
-
-The comparison breaks down the improvement (or lack thereof) by:
-  - per-swaption RMSE
-  - expiry bucket (short vs long-dated)
-  - tenor bucket (single-rate vs multi-rate)
-  - moneyness bucket (wings vs ATM)
-  - left wing vs right wing (skew structure)
-
-This is the key finding for the thesis: if roughness buys 20+ bp RMSE,
-it justifies the added model complexity.  If it buys only 5 bp, the
-multi-factor correlation structure is doing the heavy lifting.
-
-Usage:
-    python calibration_roughness.py
-
-Requires:
-    - main.py (model and infrastructure)
-    - usd_swaption_data.pkl
-    - amcc_calibration_results.pt (optional: loads existing rough results)
-"""
-
 import sys
 import os
 import time
@@ -60,27 +22,17 @@ from main import (
     ATM_TOL,
 )
 
-
-# =============================================================================
-# Configuration
-# =============================================================================
-
 CONFIG = {
-    # Data
     "data_file": "usd_swaption_data.pkl",
     "subset": "joint_all_smiles",
     "date": "2024-12-09",
     "device": "cpu",
 
-    # Rough model: load from existing calibration if available
     "rough_results_file": "amcc_calibration_results.pt",
 
-    # H=0.5 calibration settings
-    # Since H is fixed, we skip Stage 1 (approximate scheme for H gradients)
-    # and go directly to exact Cholesky calibration.
     "h05": {
-        "eta_init": 1.5,          # starting eta (= kappa when H=0.5)
-        "iterations": 1200,       # more iterations to compensate for lost DOF
+        "eta_init": 1.5,
+        "iterations": 1200,
         "lr": 5e-3,
         "N_paths": 30_000,
         "M": 50,
@@ -91,18 +43,13 @@ CONFIG = {
         "early_stop_patience": 200,
     },
 
-    # Diagnostics (same for both models -- apples-to-apples)
     "diag_N_paths": 100_000,
     "diag_M": 100,
+    "diag_scheme": "exact",
+    "diag_hybrid_kappa": 3,
 
-    # Reproducibility
     "crn_seed": 42,
 }
-
-
-# =============================================================================
-# Helpers (shared with calibration.py)
-# =============================================================================
 
 def _softplus_inv(a):
     """Numerically stable inverse of softplus."""
@@ -110,7 +57,6 @@ def _softplus_inv(a):
     if a > 20.0:
         return a
     return a + np.log(-np.expm1(-a))
-
 
 def _interpolate_alpha(alpha, matched_indices):
     """Fill unmatched alpha by linear interpolation, flat extrapolation."""
@@ -133,30 +79,16 @@ def _interpolate_alpha(alpha, matched_indices):
 
     return alpha
 
-
-# =============================================================================
-# Initialise H=0.5 model
-# =============================================================================
-
 def initialise_h05(mkt, eta_init=1.5):
-    """
-    Create parameter module with H fixed at 0.5.
-
-    When H = 0.5, the rough Bergomi variance process degenerates to
-    geometric Brownian motion -- this is the Markovian special case.
-    The deterministic ATM formula sigma_ATM = alpha * sqrt(G) is more
-    accurate here than at H = 0.2, because the variance-of-variance
-    growth is smoother.
-    """
+    """Create parameter module with H fixed at 0.5."""
     params = MappedRoughSABRParams(N=mkt.N, device=mkt.device)
     params.set_H(0.5)
-    params.fix_H()          # freeze H for the entire calibration
+    params.fix_H()
     params.set_eta(eta_init)
 
     with torch.no_grad():
         p = params()
 
-        # Match alpha analytically on 1Y-tenor swaptions
         smile_keys_1y = sorted([k for k in mkt.swaptions.keys() if k[1] == 1])
         alpha_matched = match_all_alphas(
             mkt, p["H"], p["eta"], p["rho0"], p["rho"],
@@ -166,7 +98,6 @@ def initialise_h05(mkt, eta_init=1.5):
             method="formula",
         )
 
-        # Identify matched indices and interpolate
         matched_indices = []
         for key in smile_keys_1y:
             swn = mkt.swaptions[key]
@@ -188,12 +119,8 @@ def initialise_h05(mkt, eta_init=1.5):
 
     return params
 
-
-# =============================================================================
-# MC diagnostics (reusable)
-# =============================================================================
-
-def run_diagnostics(params, mkt, label="", N_paths=100_000, M=100, seed=42):
+def run_diagnostics(params, mkt, label="", N_paths=100_000, M=100, seed=42,
+                    scheme="exact", hybrid_kappa=2):
     """Run MC diagnostics and return the report dict."""
     print(f"\n{'=' * 72}")
     print(f"MC DIAGNOSTICS -- {label}")
@@ -205,21 +132,13 @@ def run_diagnostics(params, mkt, label="", N_paths=100_000, M=100, seed=42):
         N_paths=N_paths,
         M=M,
         seed=seed,
+        scheme=scheme,
+        hybrid_kappa=hybrid_kappa,
     )
     return report
 
-
-# =============================================================================
-# Head-to-head comparison
-# =============================================================================
-
 def compare_reports(report_rough, report_h05, mkt):
-    """
-    Detailed head-to-head comparison of rough vs H=0.5 calibrations.
-
-    Breaks down by: per-swaption, expiry, tenor, moneyness bucket,
-    wing asymmetry.
-    """
+    """Detailed head-to-head comparison of rough vs H=0.5 calibrations."""
     per_r = report_rough.get("per_swaption", {})
     per_h = report_h05.get("per_swaption", {})
     keys = sorted(set(per_r.keys()) & set(per_h.keys()))
@@ -228,9 +147,6 @@ def compare_reports(report_rough, report_h05, mkt):
         print("  No common swaptions to compare.")
         return {}
 
-    # ================================================================
-    # 1. Per-swaption RMSE comparison
-    # ================================================================
     print("\n" + "=" * 100)
     print("PER-SWAPTION COMPARISON: Rough (H free) vs Markovian (H = 0.5)")
     print("=" * 100)
@@ -243,7 +159,6 @@ def compare_reports(report_rough, report_h05, mkt):
           f"{'(bp)':>8s}  {'':>8s}")
     print("  " + "-" * 90)
 
-    # Collectors
     by_expiry = {}
     by_tenor = {}
     moneyness_buckets = {
@@ -274,14 +189,13 @@ def compare_reports(report_rough, report_h05, mkt):
         if valid.sum() == 0:
             continue
 
-        err_r = res_r["iv_errors"][valid] * 10000  # bp
+        err_r = res_r["iv_errors"][valid] * 10000
         err_h = res_h["iv_errors"][valid] * 10000
 
         rmse_r = np.sqrt((err_r.numpy() ** 2).mean())
         rmse_h = np.sqrt((err_h.numpy() ** 2).mean())
-        delta_rmse = rmse_h - rmse_r  # positive = rough is better
+        delta_rmse = rmse_h - rmse_r
 
-        # ATM errors
         atm_mask = (swn.strikes - swn.S0).abs() < ATM_TOL
         atm_r = (res_r["iv_errors"][atm_mask][0].item() * 10000
                  if atm_mask.sum() > 0 else float('nan'))
@@ -305,7 +219,6 @@ def compare_reports(report_rough, report_h05, mkt):
             "delta": delta_rmse, "atm_rough": atm_r, "atm_h05": atm_h,
         })
 
-        # Accumulate
         sq_r = (err_r.numpy() ** 2).tolist()
         sq_h = (err_h.numpy() ** 2).tolist()
         all_rough_sq.extend(sq_r)
@@ -319,8 +232,7 @@ def compare_reports(report_rough, report_h05, mkt):
         by_tenor[tenor]["rough_sq"].extend(sq_r)
         by_tenor[tenor]["h05_sq"].extend(sq_h)
 
-        # Per-strike: moneyness buckets and wing analysis
-        offsets = ((swn.strikes - swn.S0) * 10000).numpy()  # bp
+        offsets = ((swn.strikes - swn.S0) * 10000).numpy()
         for i_s in range(swn.n_strikes):
             if not valid[i_s]:
                 continue
@@ -348,7 +260,6 @@ def compare_reports(report_rough, report_h05, mkt):
                 wing_data["right_rough"].append(e_r)
                 wing_data["right_h05"].append(e_h)
 
-    # ---- Totals ----
     print("  " + "-" * 90)
     total_r = np.sqrt(np.mean(all_rough_sq))
     total_h = np.sqrt(np.mean(all_h05_sq))
@@ -359,9 +270,6 @@ def compare_reports(report_rough, report_h05, mkt):
     print(f"\n  Rough wins {rough_wins}/{len(keys)} swaptions, "
           f"H=0.5 wins {h05_wins}/{len(keys)}")
 
-    # ================================================================
-    # 2. By expiry
-    # ================================================================
     print(f"\n  {'BREAKDOWN BY EXPIRY':=^70}")
     print(f"  {'Expiry':>8s}  {'Rough':>8s}  {'H=0.5':>8s}  "
           f"{'D RMSE':>8s}  {'Rel D':>8s}")
@@ -378,9 +286,6 @@ def compare_reports(report_rough, report_h05, mkt):
         print(f"  {exp:>6.0f}Y  {r:8.1f}  {h:8.1f}  "
               f"{delta:+8.1f}  {rel:+7.1f}%")
 
-    # ================================================================
-    # 3. By tenor
-    # ================================================================
     print(f"\n  {'BREAKDOWN BY TENOR':=^70}")
     print(f"  {'Tenor':>8s}  {'Rough':>8s}  {'H=0.5':>8s}  "
           f"{'D RMSE':>8s}  {'Rel D':>8s}  {'#swn':>6s}")
@@ -398,9 +303,6 @@ def compare_reports(report_rough, report_h05, mkt):
         print(f"  {ten:>6.0f}Y  {r:8.1f}  {h:8.1f}  "
               f"{delta:+8.1f}  {rel:+7.1f}%  {n_swn:>6d}")
 
-    # ================================================================
-    # 4. By moneyness
-    # ================================================================
     print(f"\n  {'BREAKDOWN BY MONEYNESS':=^70}")
     bucket_labels = {
         "deep_ITM": "Deep ITM (<=-100bp)",
@@ -425,9 +327,6 @@ def compare_reports(report_rough, report_h05, mkt):
         print(f"  {bucket_labels[bk]:>22s}  {r:8.1f}  {h:8.1f}  "
               f"{delta:+8.1f}  {rel:+7.1f}%  {len(r_sq):>6d}")
 
-    # ================================================================
-    # 5. Wing asymmetry
-    # ================================================================
     print(f"\n  {'WING BIAS COMPARISON':=^70}")
     for side, label in [("left", "Left wing (K < S0)"),
                         ("right", "Right wing (K > S0)")]:
@@ -455,11 +354,6 @@ def compare_reports(report_rough, report_h05, mkt):
         "rough_wins": rough_wins,
         "h05_wins": h05_wins,
     }
-
-
-# =============================================================================
-# Comparison plots
-# =============================================================================
 
 def save_comparison_plots(params_rough, params_h05, mkt, cfg):
     """Side-by-side smile fits: rough vs H=0.5."""
@@ -490,6 +384,8 @@ def save_comparison_plots(params_rough, params_h05, mkt, cfg):
     )
 
     cholesky_cache_r, cholesky_cache_h = {}, {}
+    diag_scheme = cfg.get("diag_scheme", "exact")
+    diag_kappa = cfg.get("diag_hybrid_kappa", 2)
 
     with torch.no_grad():
         for row_idx, mat in enumerate(maturities):
@@ -500,24 +396,28 @@ def save_comparison_plots(params_rough, params_h05, mkt, cfg):
                 strikes_pct = swn.strikes.numpy() * 100
                 mkt_ivs = swn.ivs_black.numpy() * 100
 
-                # Rough model
                 torch.manual_seed(cfg["crn_seed"])
                 S_T_r = simulate_swaption(
                     params_rough, swn, mkt,
-                    N_paths=50_000, M=80, use_exact=True,
+                    N_paths=50_000, M=80,
+                    use_exact=(diag_scheme == "exact"),
                     variance_curve_mode="full",
                     cholesky_cache=cholesky_cache_r,
+                    scheme=diag_scheme,
+                    hybrid_kappa=diag_kappa,
                 )
                 mc_r = compute_swaption_prices(S_T_r, swn)
                 mod_r = mc_prices_to_black_iv(mc_r, swn).numpy() * 100
 
-                # H=0.5 model
                 torch.manual_seed(cfg["crn_seed"])
                 S_T_h = simulate_swaption(
                     params_h05, swn, mkt,
-                    N_paths=50_000, M=80, use_exact=True,
+                    N_paths=50_000, M=80,
+                    use_exact=(diag_scheme == "exact"),
                     variance_curve_mode="full",
                     cholesky_cache=cholesky_cache_h,
+                    scheme=diag_scheme,
+                    hybrid_kappa=diag_kappa,
                 )
                 mc_h = compute_swaption_prices(S_T_h, swn)
                 mod_h = mc_prices_to_black_iv(mc_h, swn).numpy() * 100
@@ -545,7 +445,6 @@ def save_comparison_plots(params_rough, params_h05, mkt, cfg):
     print("Saved: roughness_ablation_smiles.png")
     plt.close(fig)
 
-    # ---- RMSE bar chart ----
     fig, ax = plt.subplots(figsize=(12, 5))
     all_keys = sorted(set(mkt.swaptions.keys()))
     labels = [f"{k[0]:.0f}Y x {k[1]:.0f}Y" for k in all_keys]
@@ -558,11 +457,15 @@ def save_comparison_plots(params_rough, params_h05, mkt, cfg):
             params_rough, swn, mkt,
             variance_curve_mode="full",
             N_paths=50_000, M=80, seed=cfg["crn_seed"],
+            scheme=diag_scheme,
+            hybrid_kappa=diag_kappa,
         )
         res_h = compute_model_smile(
             params_h05, swn, mkt,
             variance_curve_mode="full",
             N_paths=50_000, M=80, seed=cfg["crn_seed"],
+            scheme=diag_scheme,
+            hybrid_kappa=diag_kappa,
         )
 
         valid = ~torch.isnan(res_r["iv_errors"]) & ~torch.isnan(res_h["iv_errors"])
@@ -590,19 +493,11 @@ def save_comparison_plots(params_rough, params_h05, mkt, cfg):
     print("Saved: roughness_ablation_rmse_bars.png")
     plt.close(fig)
 
-
-# =============================================================================
-# Main
-# =============================================================================
-
 if __name__ == "__main__":
 
     t_start = time.time()
     cfg = CONFIG
 
-    # ----------------------------------------------------------------
-    # 1. Load market data
-    # ----------------------------------------------------------------
     print("=" * 72)
     print("ROUGHNESS ABLATION STUDY: H < 1/2  vs  H = 1/2")
     print("=" * 72)
@@ -616,9 +511,6 @@ if __name__ == "__main__":
     )
     print_market_summary(mkt)
 
-    # ----------------------------------------------------------------
-    # 2. Load or reconstruct rough model
-    # ----------------------------------------------------------------
     print("\n" + "#" * 60)
     print("# MODEL A: Rough (H free)")
     print("#" * 60)
@@ -648,9 +540,6 @@ if __name__ == "__main__":
         print(f"  Run calibration.py first, then re-run this script.")
         sys.exit(1)
 
-    # ----------------------------------------------------------------
-    # 3. Calibrate H=0.5 model
-    # ----------------------------------------------------------------
     print("\n" + "#" * 60)
     print("# MODEL B: Markovian special case (H = 0.5)")
     print("#" * 60)
@@ -674,7 +563,7 @@ if __name__ == "__main__":
         use_crn=True,
         crn_seed=cfg["crn_seed"],
         log_every=20,
-        swaption_keys=None,            # all swaptions
+        swaption_keys=None,
         scheduler_type=h05cfg["scheduler"],
         warmup_steps=h05cfg["warmup_steps"],
         cosine_power=h05cfg["cosine_power"],
@@ -693,9 +582,6 @@ if __name__ == "__main__":
         print(f"    alpha = [{', '.join(f'{a:.4f}' for a in p_h['alpha'].numpy())}]")
         print(f"    rho0  = [{', '.join(f'{r:.3f}' for r in p_h['rho0'].numpy())}]")
 
-    # ----------------------------------------------------------------
-    # 4. MC diagnostics -- both models, same settings
-    # ----------------------------------------------------------------
     print("\n" + "#" * 60)
     print("# DIAGNOSTICS")
     print("#" * 60)
@@ -703,25 +589,23 @@ if __name__ == "__main__":
     report_rough = run_diagnostics(
         params_rough, mkt, label="Rough (H free)",
         N_paths=cfg["diag_N_paths"], M=cfg["diag_M"], seed=cfg["crn_seed"],
+        scheme=cfg.get("diag_scheme", "exact"),
+        hybrid_kappa=cfg.get("diag_hybrid_kappa", 2),
     )
 
     report_h05 = run_diagnostics(
         params_h05, mkt, label="Markovian (H = 0.5)",
         N_paths=cfg["diag_N_paths"], M=cfg["diag_M"], seed=cfg["crn_seed"],
+        scheme=cfg.get("diag_scheme", "exact"),
+        hybrid_kappa=cfg.get("diag_hybrid_kappa", 2),
     )
 
-    # ----------------------------------------------------------------
-    # 5. Head-to-head comparison
-    # ----------------------------------------------------------------
     print("\n" + "#" * 60)
     print("# HEAD-TO-HEAD COMPARISON")
     print("#" * 60)
 
     comparison = compare_reports(report_rough, report_h05, mkt)
 
-    # ----------------------------------------------------------------
-    # 6. Smile comparisons (selected swaptions)
-    # ----------------------------------------------------------------
     print("\n" + "#" * 60)
     print("# SMILE COMPARISONS (selected swaptions)")
     print("#" * 60)
@@ -733,6 +617,8 @@ if __name__ == "__main__":
         (7.0, 1), (7.0, 3),
         (10.0, 1),
     ]
+    diag_scheme = cfg.get("diag_scheme", "exact")
+    diag_kappa = cfg.get("diag_hybrid_kappa", 2)
     for key in representative_keys:
         if key in mkt.swaptions:
             print(f"\n--- {key[0]:.0f}Y x {key[1]:.0f}Y ---")
@@ -741,26 +627,24 @@ if __name__ == "__main__":
                 params_rough, mkt.swaptions[key], mkt,
                 variance_curve_mode="full",
                 N_paths=cfg["diag_N_paths"], M=cfg["diag_M"],
+                scheme=diag_scheme,
+                hybrid_kappa=diag_kappa,
             )
             print("  [H=0.5]")
             print_smile_comparison(
                 params_h05, mkt.swaptions[key], mkt,
                 variance_curve_mode="full",
                 N_paths=cfg["diag_N_paths"], M=cfg["diag_M"],
+                scheme=diag_scheme,
+                hybrid_kappa=diag_kappa,
             )
 
-    # ----------------------------------------------------------------
-    # 7. Plots
-    # ----------------------------------------------------------------
     print("\n" + "#" * 60)
     print("# GENERATING PLOTS")
     print("#" * 60)
 
     save_comparison_plots(params_rough, params_h05, mkt, cfg)
 
-    # ----------------------------------------------------------------
-    # 8. Summary verdict
-    # ----------------------------------------------------------------
     print("\n" + "#" * 60)
     print("# SUMMARY")
     print("#" * 60)
@@ -788,9 +672,6 @@ if __name__ == "__main__":
         print("  The multi-factor FMM correlation structure does the")
         print("  heavy lifting; H < 1/2 is a refinement, not the main driver.")
 
-    # ----------------------------------------------------------------
-    # 9. Save results
-    # ----------------------------------------------------------------
     elapsed = time.time() - t_start
 
     results = {
