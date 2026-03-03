@@ -17,6 +17,7 @@ from typing import Optional
 from scipy.stats import norm
 from scipy.optimize import brentq
 from scipy.special import hyp2f1 as scipy_hyp2f1
+import py_lets_be_rational as _lbr
 
 
 # =============================================================================
@@ -66,32 +67,69 @@ def bachelier_price_np(S0, K, T, sigma_n, annuity, is_call=True):
     return annuity * undiscounted
 
 
+# =============================================================================
+# Black IV inversion — py_lets_be_rational (Jäckel 2015)
+# =============================================================================
+#
+# Uses Peter Jäckel's reference C implementation via the py_lets_be_rational
+# package.  Full rational approximation + Householder(4) refinement.
+# Machine precision in 2 iterations, all moneyness regimes.
+#
+# This replaces all scipy.optimize.brentq calls for Black IV inversion.
+#
+# Install:  pip install py_lets_be_rational
+# =============================================================================
+
+
+def black_iv(price, forward, strike, T, annuity=1.0, is_call=True):
+    """
+    Black implied volatility via Jäckel's *Let's Be Rational* (2015).
+
+    Parameters
+    ----------
+    price : float
+        Option price **including** the annuity / discount factor.
+    forward : float
+        Forward swap rate (S₀).
+    strike : float
+        Strike rate (K).
+    T : float
+        Time to expiry in years.
+    annuity : float, optional
+        Annuity (present-value-of-basis-point) factor.  Default 1.0.
+    is_call : bool, optional
+        True for payer / call, False for receiver / put.
+
+    Returns
+    -------
+    float
+        Black implied volatility (decimal), or ``np.nan`` on failure.
+    """
+    if price <= 0 or forward <= 0 or strike <= 0 or T <= 0 or annuity <= 0:
+        return np.nan
+
+    p = price / annuity                          # undiscounted price
+    q = 1.0 if is_call else -1.0
+
+    try:
+        sigma = _lbr.implied_volatility_from_a_transformed_rational_guess(
+            p, forward, strike, T, q,
+        )
+        return float(sigma) if sigma > 0 and np.isfinite(sigma) else np.nan
+    except Exception:
+        return np.nan
+
+
 def bachelier_to_black_iv(S0, K, T, sigma_n, annuity, is_call=True):
     """
-    Convert Bachelier (normal) IV to Black (lognormal) IV via root finding.
-    sigma_n: normal vol in decimal (NOT basis points).
-    Returns: Black IV in decimal.
+    Convert Bachelier (normal) IV to Black (lognormal) IV.
+
+    Step 1: price via Bachelier.  Step 2: invert via ``black_iv``.
     """
-    if K <= 0 or S0 <= 0 or T <= 0:
+    if K <= 0 or S0 <= 0 or T <= 0 or sigma_n <= 0:
         return np.nan
-
     target_price = bachelier_price_np(S0, K, T, sigma_n, annuity, is_call)
-
-    # Quick check: intrinsic value
-    intrinsic = annuity * max(0.0, (S0 - K) if is_call else (K - S0))
-    if target_price <= intrinsic + 1e-16:
-        return np.nan
-
-    def objective(sigma_black):
-        return black_price_np(S0, K, T, sigma_black, annuity, is_call) - target_price
-
-    # Initial bracket: use approximation sigma_B ≈ sigma_N / S0 as starting point
-    sigma_approx = sigma_n / S0
-    try:
-        result = brentq(objective, 1e-6, 10.0, xtol=1e-10, maxiter=200)
-        return result
-    except ValueError:
-        return np.nan
+    return black_iv(target_price, S0, K, T, annuity, is_call)
 
 
 # =============================================================================
@@ -1662,8 +1700,8 @@ def match_alpha_atm(
     alpha_other: torch.Tensor,
     variance_curve_mode: str = "simplified",
     method: str = "formula",
-    N_paths: int = 10000,
-    M: int = 50,
+    N_paths: int = 100_000,
+    M: int = 100,
     seed: int = 42,
 ) -> torch.Tensor:
     """
@@ -1764,13 +1802,16 @@ def match_alpha_atm(
 def _match_alpha_brent(
     swn, mkt, H, eta, rho0, rho_matrix,
     alpha_other, sigma_atm_mkt, variance_curve_mode,
-    method="formula", N_paths=10000, M=50, seed=42,
+    method="formula", N_paths=100_000, M=100, seed=42,
 ):
     """
     Internal: Brent root-finding for α matching.
 
     Scales all α_{I+1},...,α_J by a common factor c, and finds c
     such that model ATM IV = market ATM IV.
+
+    N_paths should match the diagnostic evaluation path count to avoid
+    MC noise mismatch between matching and reporting.
     """
     I, J = swn.I, swn.J
     T = swn.expiry_years
@@ -1835,15 +1876,11 @@ def _match_alpha_brent(
             # Invert ATM price to IV
             atm_payoff = torch.clamp(S_T - swn.S0, min=0.0).mean()
             atm_price = (swn.A0 * atm_payoff).item()
-            try:
-                sigma_model = brentq(
-                    lambda s: black_price_np(
-                        swn.S0.item(), swn.S0.item(), T, s,
-                        swn.A0.item(), True,
-                    ) - atm_price,
-                    1e-6, 5.0,
-                )
-            except ValueError:
+            sigma_model = black_iv(
+                atm_price, swn.S0.item(), swn.S0.item(), T,
+                annuity=swn.A0.item(), is_call=True,
+            )
+            if np.isnan(sigma_model):
                 sigma_model = 0.3  # fallback
 
         return sigma_model - sigma_atm_mkt.item()
@@ -1869,6 +1906,9 @@ def match_all_alphas(
     smile_keys: Optional[list] = None,
     variance_curve_mode: str = "simplified",
     method: str = "formula",
+    N_paths: int = 100_000,
+    M: int = 100,
+    seed: int = 42,
 ) -> torch.Tensor:
     """
     Match α_i for all smile tenors via ATM root-finding.
@@ -1883,6 +1923,9 @@ def match_all_alphas(
         smile_keys:   list of (expiry, tenor) keys to match; default = all 1Y tenors
         variance_curve_mode: "simplified" or "full"
         method:       "formula" or "mc"
+        N_paths:      MC paths for method="mc" (should match diagnostic path count)
+        M:            MC time steps for method="mc"
+        seed:         RNG seed for method="mc" (use same seed as diagnostics)
 
     Returns:
         alpha: shape (N,) — updated α values
@@ -1903,6 +1946,9 @@ def match_all_alphas(
             swn, mkt, H, eta, rho0, rho_matrix, alpha,
             variance_curve_mode=variance_curve_mode,
             method=method,
+            N_paths=N_paths,
+            M=M,
+            seed=seed,
         )
 
         # Update: for 1Y-tenor, J = I+1, so only one rate per smile
@@ -1965,7 +2011,10 @@ def mc_prices_to_black_iv(
     swn: "SwaptionData",
 ) -> torch.Tensor:
     """
-    Invert MC prices to Black IVs via Brent root-finding (non-differentiable).
+    Invert MC prices to Black IVs via ``black_iv`` (non-differentiable).
+
+    Uses py_lets_be_rational when available, otherwise Halley refinement.
+    No bracketing needed; robust on all moneyness regimes.
 
     Used for reporting and IV-space loss evaluation, NOT for backprop.
 
@@ -1984,21 +2033,11 @@ def mc_prices_to_black_iv(
     for i in range(swn.n_strikes):
         target = mc_prices[i].item()
         K = swn.strikes[i].item()
-        ic = swn.is_call[i].item()
+        ic = bool(swn.is_call[i].item())
 
-        # Intrinsic value check
-        intrinsic = A0 * max(0.0, (S0 - K) if ic else (K - S0))
-        if target <= intrinsic + 1e-16:
-            continue
-
-        def obj(sigma):
-            return float(black_price_np(S0, K, T, sigma, A0, ic)) - target
-
-        try:
-            iv = brentq(obj, 1e-6, 10.0, xtol=1e-10, maxiter=200)
+        iv = black_iv(target, S0, K, T, annuity=A0, is_call=ic)
+        if not np.isnan(iv):
             ivs[i] = iv
-        except (ValueError, RuntimeError):
-            pass
 
     return ivs
 

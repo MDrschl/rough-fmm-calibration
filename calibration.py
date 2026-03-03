@@ -78,7 +78,7 @@ CONFIG = {
     # Calibration mode: "hybrid" (recommended) or "two_stage" (legacy)
     #   "hybrid"    — single-stage, BLP scheme, H differentiable throughout
     #   "two_stage" — Stage 1 approx (H free) → Stage 2 exact (H frozen)
-    "mode": "hybrid",
+    "mode": "two_stage",
 
     # Single-stage hybrid settings (used when mode="hybrid")
     "hybrid": {
@@ -859,6 +859,9 @@ if __name__ == "__main__":
             smile_keys=smile_keys_oos,
             variance_curve_mode="full",
             method="mc",
+            N_paths=cfg["diag_N_paths"],
+            M=cfg["diag_M"],
+            seed=cfg["crn_seed"],
         )
 
         # Identify matched indices and interpolate unmatched ones

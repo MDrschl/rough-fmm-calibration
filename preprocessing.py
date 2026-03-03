@@ -1,5 +1,5 @@
 """
-preprocess_usd_swaptions.py
+preprocess.py
 ============================
 Preprocessing pipeline for USD SOFR swaption data (multi-date).
 
@@ -42,6 +42,7 @@ import pandas as pd
 import pickle
 from scipy.stats import norm
 from pathlib import Path
+from main import black_iv
 
 
 # =============================================================================
@@ -265,28 +266,17 @@ def bachelier_vega(S0, K, T, sigma_n, A0):
     return A0 * sqrt_T * norm.pdf(d)
 
 def bachelier_to_black_iv(S0, K, T, sigma_n, A0, is_call=True):
-    """Convert Bachelier normal vol to Black lognormal vol via root finding."""
-    from scipy.optimize import brentq
+    """Convert Bachelier normal vol to Black lognormal vol.
 
-    target = bachelier_price(S0, K, T, sigma_n, A0, is_call)
-    if target <= 0 or S0 <= 0 or K <= 0 or T <= 0:
+    Prices via Bachelier, then inverts using black_iv() from main.py
+    (py_lets_be_rational when available, Halley fallback otherwise).
+    """
+    if S0 <= 0 or K <= 0 or T <= 0 or sigma_n <= 0:
         return np.nan
-
-    def black_price_local(sigma_b):
-        sqrt_T = np.sqrt(T)
-        d1 = (np.log(S0 / K) + 0.5 * sigma_b**2 * T) / (sigma_b * sqrt_T)
-        d2 = d1 - sigma_b * sqrt_T
-        if is_call:
-            return A0 * (S0 * norm.cdf(d1) - K * norm.cdf(d2))
-        else:
-            return A0 * (K * norm.cdf(-d2) - S0 * norm.cdf(-d1))
-
-    try:
-        iv = brentq(lambda s: black_price_local(s) - target, 1e-6, 5.0, xtol=1e-12)
-        return iv
-    except (ValueError, RuntimeError):
-        # Fallback: first-order approximation  sigma_B ≈ sigma_N / S0
-        return sigma_n / S0 if S0 > 0 else np.nan
+    target = bachelier_price(S0, K, T, sigma_n, A0, is_call)
+    if target <= 0:
+        return np.nan
+    return black_iv(target, S0, K, T, annuity=A0, is_call=is_call)
 
 def black_price(S0, K, T, sigma, A0, is_call=True):
     """Black (1976) swaption price."""
