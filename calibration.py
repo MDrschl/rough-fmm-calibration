@@ -78,7 +78,7 @@ CONFIG = {
     # Calibration mode: "hybrid" (recommended) or "two_stage" (legacy)
     #   "hybrid"    — single-stage, BLP scheme, H differentiable throughout
     #   "two_stage" — Stage 1 approx (H free) → Stage 2 exact (H frozen)
-    "mode": "two_stage",
+    "mode": "hybrid",
 
     # Single-stage hybrid settings (used when mode="hybrid")
     "hybrid": {
