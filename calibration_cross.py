@@ -108,6 +108,7 @@ CONFIG = {
         "variance_mode": "full",
         "scheduler": "cosine",
         "warmup_steps": 30,
+        "cosine_power": 0.5,
     },
 
     # Early stopping (applies to all stages)
@@ -721,6 +722,7 @@ if __name__ == "__main__":
             stage2_keys=train_keys,
             stage2_scheduler=cfg["stage2"].get("scheduler", "cosine"),
             stage2_warmup_steps=cfg["stage2"].get("warmup_steps", 30),
+            stage2_cosine_power=cfg["stage2"].get("cosine_power", 0.5),
             use_crn=True,
             crn_seed=cfg["crn_seed"],
             log_every=20,

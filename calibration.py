@@ -113,6 +113,7 @@ CONFIG = {
         "keys": None,
         "scheduler": "cosine",         # cosine annealing with warmup
         "warmup_steps": 30,            # linear warmup before cosine decay
+        "cosine_power": 0.5,           # power steepening: faster early decay
     },
 
     # Early stopping (applies to all stages)
@@ -741,6 +742,7 @@ if __name__ == "__main__":
             stage2_keys=cfg["stage2"]["keys"],
             stage2_scheduler=cfg["stage2"].get("scheduler", "cosine"),
             stage2_warmup_steps=cfg["stage2"].get("warmup_steps", 30),
+            stage2_cosine_power=cfg["stage2"].get("cosine_power", 0.5),
             # Common
             use_crn=True,
             crn_seed=cfg["crn_seed"],

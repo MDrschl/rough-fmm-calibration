@@ -2226,6 +2226,43 @@ def compute_total_loss(
 # Common random numbers (CRN): fix the seed each iteration so that
 # the same noise realization is used, reducing MC gradient variance.
 
+
+class SteepCosineAnnealingLR(torch.optim.lr_scheduler._LRScheduler):
+    """
+    Cosine annealing with power-steepened progress.
+
+    Standard cosine:  lr = η_min + ½(η_max − η_min)(1 + cos(π · t/T))
+    Steepened:        lr = η_min + ½(η_max − η_min)(1 + cos(π · (t/T)^p))
+
+    When p < 1 (e.g. 0.5), the progress variable (t/T)^p advances faster
+    initially, compressing the flat top and accelerating early decay.
+    The schedule still reaches η_min smoothly at t = T.
+
+    p = 1.0 recovers standard CosineAnnealingLR.
+    p = 0.5 is recommended for refinement stages.
+    """
+    def __init__(self, optimizer, T_max, eta_min=1e-6, power=0.5,
+                 last_epoch=-1):
+        self.T_max = T_max
+        self.eta_min = eta_min
+        self.power = power
+        super().__init__(optimizer, last_epoch)
+
+    def get_lr(self):
+        t = self.last_epoch
+        T = self.T_max
+        p = self.power
+        # Clamp progress to [0, 1]
+        progress = min(max(t / T, 0.0), 1.0)
+        # Power-steepen: progress^p with p < 1 → faster initial advance
+        steepened = progress ** p
+        cosine_factor = 0.5 * (1.0 + np.cos(np.pi * steepened))
+        return [
+            self.eta_min + (base_lr - self.eta_min) * cosine_factor
+            for base_lr in self.base_lrs
+        ]
+
+
 def calibrate(
     params: "MappedRoughSABRParams",
     mkt: "MarketData",
@@ -2244,6 +2281,7 @@ def calibrate(
     scheduler_factor: float = 0.5,
     min_lr: float = 1e-6,
     warmup_steps: int = 0,
+    cosine_power: float = 1.0,
     scheme: Optional[str] = None,
     hybrid_kappa: int = 2,
     early_stop_patience: Optional[int] = None,
@@ -2280,6 +2318,11 @@ def calibrate(
         min_lr:              minimum learning rate (used by both schedulers)
         warmup_steps:        (cosine only) linear warmup from min_lr to lr
                              over this many steps before cosine decay begins
+        cosine_power:        (cosine only) power steepening exponent.
+                             p=1.0 is standard cosine; p<1 (e.g. 0.5)
+                             compresses the flat top and accelerates early
+                             decay.  Recommended: 1.0 for exploration stages,
+                             0.5 for refinement stages.
         scheme:              "exact", "approx", or "hybrid"
         hybrid_kappa:        near-field cells for hybrid scheme
         early_stop_patience: stop if best loss hasn't improved for this many
@@ -2301,9 +2344,13 @@ def calibrate(
     if scheduler_type == "cosine":
         # Cosine annealing: lr decays smoothly from `lr` to `min_lr`
         # over (n_iterations - warmup_steps) steps, with optional linear warmup.
+        # When cosine_power < 1 (e.g. 0.5), the flat top of the standard
+        # cosine is compressed, accelerating early decay.  This is desirable
+        # for refinement stages (Stage 2) where we start in the right basin.
         cosine_steps = max(1, n_iterations - warmup_steps)
-        cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        cosine_scheduler = SteepCosineAnnealingLR(
             optimizer, T_max=cosine_steps, eta_min=min_lr,
+            power=cosine_power,
         )
         if warmup_steps > 0:
             warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
@@ -2436,6 +2483,7 @@ def calibrate_two_stage(
     stage2_keys: Optional[list] = None,
     stage2_scheduler: str = "cosine",
     stage2_warmup_steps: int = 20,
+    stage2_cosine_power: float = 0.5,
     # Common
     use_crn: bool = True,
     crn_seed: int = 42,
@@ -2514,6 +2562,7 @@ def calibrate_two_stage(
         swaption_keys=stage2_keys,
         scheduler_type=stage2_scheduler,    # refinement: smooth cosine decay
         warmup_steps=stage2_warmup_steps,
+        cosine_power=stage2_cosine_power,
         early_stop_patience=early_stop_patience,
         early_stop_tol=early_stop_tol,
     )
