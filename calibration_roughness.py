@@ -88,7 +88,6 @@ CONFIG = {
         "scheduler": "cosine",
         "warmup_steps": 50,
         "cosine_power": 0.5,
-        "rematch_alpha": True,
         "early_stop_patience": 200,
     },
 
@@ -681,7 +680,6 @@ if __name__ == "__main__":
         cosine_power=h05cfg["cosine_power"],
         early_stop_patience=h05cfg["early_stop_patience"],
         early_stop_tol=1e-4,
-        rematch_alpha=h05cfg.get("rematch_alpha", True),
     )
 
     if result_h05["best_state"] is not None:

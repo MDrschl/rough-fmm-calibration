@@ -114,7 +114,6 @@ CONFIG = {
         "scheduler": "cosine",         # cosine annealing with warmup
         "warmup_steps": 30,            # linear warmup before cosine decay
         "cosine_power": 0.5,           # power steepening: faster early decay
-        "rematch_alpha": True,         # separate level from shape: re-match alpha to ATM after every step
     },
 
     # Early stopping (applies to all stages)
@@ -747,7 +746,6 @@ if __name__ == "__main__":
             stage2_scheduler=cfg["stage2"].get("scheduler", "cosine"),
             stage2_warmup_steps=cfg["stage2"].get("warmup_steps", 30),
             stage2_cosine_power=cfg["stage2"].get("cosine_power", 0.5),
-            stage2_rematch_alpha=cfg["stage2"].get("rematch_alpha", False),
             # Common
             use_crn=True,
             crn_seed=cfg["crn_seed"],

@@ -2395,7 +2395,6 @@ def calibrate(
     hybrid_kappa: int = 2,
     early_stop_patience: Optional[int] = None,
     early_stop_tol: float = 1e-4,
-    rematch_alpha: bool = True,
 ) -> dict:
     """
     Layer 7: Run the calibration loop.
@@ -2441,9 +2440,6 @@ def calibrate(
                              compresses the flat top and accelerates early
                              decay.  Recommended: 1.0 for exploration stages,
                              0.5 for refinement stages.
-        rematch_alpha:       if True, exclude alpha from optimizer and
-                             re-match to ATM after every step.  Separates
-                             level (alpha) from shape (eta, rho0, rho).
         scheme:              "exact", "approx", or "hybrid"
         hybrid_kappa:        near-field cells for hybrid scheme
         early_stop_patience: stop if best loss hasn't improved for this many
@@ -2459,18 +2455,7 @@ def calibrate(
     # Resolve scheme for cache decision
     effective_scheme = scheme if scheme is not None else ("exact" if use_exact else "approx")
 
-    # When rematch_alpha is True, exclude alpha from the optimizer:
-    # the optimizer only updates shape parameters (eta, rho0, rho, and H
-    # if unfrozen), and alpha is re-matched to ATM after every step.
-    if rematch_alpha:
-        params.fix_alpha()
-        shape_params = [p for p in params.parameters() if p.requires_grad]
-        if not shape_params:
-            raise ValueError("rematch_alpha=True but no shape parameters "
-                             "require gradients. Is H also frozen?")
-        optimizer = torch.optim.Adam(shape_params, lr=lr)
-    else:
-        optimizer = torch.optim.Adam(params.parameters(), lr=lr)
+    optimizer = torch.optim.Adam(params.parameters(), lr=lr)
 
     # Build scheduler
     if scheduler_type == "cosine":
@@ -2539,10 +2524,6 @@ def calibrate(
 
         optimizer.step()
 
-        # Re-match alpha to pin ATM levels after shape param update
-        if rematch_alpha:
-            rematch_alpha_to_atm(params, mkt, variance_curve_mode="simplified")
-
         # Step the scheduler (plateau needs the loss value; cosine does not)
         if scheduler_is_plateau:
             scheduler.step(loss.item())
@@ -2594,10 +2575,6 @@ def calibrate(
         if effective_scheme == "exact" and step > 0 and step % 50 == 0:
             cholesky_cache.clear()
 
-    # Restore alpha grad state if we froze it
-    if rematch_alpha:
-        params.unfix_alpha()
-
     return {
         "history": history,
         "best_state": best_state,
@@ -2624,7 +2601,6 @@ def calibrate_two_stage(
     stage2_scheduler: str = "cosine",
     stage2_warmup_steps: int = 20,
     stage2_cosine_power: float = 0.5,
-    stage2_rematch_alpha: bool = False,
     # Common
     use_crn: bool = True,
     crn_seed: int = 42,
@@ -2675,7 +2651,6 @@ def calibrate_two_stage(
         scheduler_type="plateau",       # exploration: reduce lr on stall
         early_stop_patience=early_stop_patience,
         early_stop_tol=early_stop_tol,
-        rematch_alpha=True,             # always separate level from shape
     )
 
     # Load best Stage 1 parameters
@@ -2707,7 +2682,6 @@ def calibrate_two_stage(
         cosine_power=stage2_cosine_power,
         early_stop_patience=early_stop_patience,
         early_stop_tol=early_stop_tol,
-        rematch_alpha=stage2_rematch_alpha,
     )
 
     # Load best Stage 2 parameters
