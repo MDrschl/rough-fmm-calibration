@@ -43,7 +43,7 @@ CONFIG = {
     #   "adachi"            — Mode D: Adachi-style, 1Y smiles → ρ_{ij} from ATM
     #   "roughness"         — Mode E: ablation study, H free vs H = 0.5
     #   "cross"             — Mode F: train/test split cross-validation
-    "mode": "two_stage",
+    "mode": "hybrid_two_stage",
 
     # --- Mode A: Single-stage hybrid ---
     "hybrid": {
