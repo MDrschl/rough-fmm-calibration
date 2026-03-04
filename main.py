@@ -351,6 +351,46 @@ class MappedRoughSABRParams(nn.Module):
         """Unfreeze alpha (restore standard joint calibration)."""
         self.alpha_tilde.requires_grad_(True)
 
+    def fix_eta(self):
+        """Freeze eta."""
+        self.eta_tilde.requires_grad_(False)
+
+    def unfix_eta(self):
+        """Unfreeze eta."""
+        self.eta_tilde.requires_grad_(True)
+
+    def fix_omega(self):
+        """Freeze correlation matrix (ω angles)."""
+        self.omega_tilde.requires_grad_(False)
+
+    def unfix_omega(self):
+        """Unfreeze correlation matrix (ω angles)."""
+        self.omega_tilde.requires_grad_(True)
+
+    def register_freeze_rho_hook(self):
+        """Freeze inter-rate correlations ρ_{ij} while keeping ρ₀ free.
+
+        Zeros gradients for omega_tilde[:, 1:] (columns that control ρ).
+        Returns hook handle — call handle.remove() when done.
+        """
+        def _hook(grad):
+            mask = grad.clone()
+            mask[:, 1:] = 0.0
+            return mask
+        return self.omega_tilde.register_hook(_hook)
+
+    def register_freeze_rho0_hook(self):
+        """Freeze spot-vol correlations ρ₀ while keeping ρ_{ij} free.
+
+        Zeros gradients for omega_tilde[:, 0] (first column that controls ρ₀).
+        Returns hook handle — call handle.remove() when done.
+        """
+        def _hook(grad):
+            mask = grad.clone()
+            mask[:, 0] = 0.0
+            return mask
+        return self.omega_tilde.register_hook(_hook)
+
 def volterra_gamma_integral(
     t: torch.Tensor,
     H: torch.Tensor,
@@ -521,7 +561,7 @@ def build_cholesky(H: float, M: int, T: float, device: str = "cpu") -> torch.Ten
     """Build and Cholesky-decompose the fBM-BM covariance matrix."""
     cov = covariance_matrix_rBergomi(H, M, T)
     L = np.linalg.cholesky(cov)
-    return torch.tensor(L, dtype=torch.float64, device=device)
+    return torch.tensor(L, dtype=torch.float64, device=torch.device(device))
 
 def simulate_exact(
     S0: torch.Tensor,
@@ -1017,7 +1057,8 @@ def _match_alpha_brent(
     cholesky_L = None
     if method == "mc":
         H_val = H.detach().item()
-        cholesky_L = build_cholesky(H_val, M, T)
+        device = str(swn.S0.device)
+        cholesky_L = build_cholesky(H_val, M, T, device=device)
 
     def objective(log_c):
         c = np.exp(log_c)
@@ -1242,6 +1283,7 @@ def compute_total_loss(
     scheme: Optional[str] = None,
     hybrid_kappa: int = 2,
     compute_diagnostics: bool = True,
+    atm_only: bool = False,
 ) -> dict:
     """Layer 6: Compute the total calibration loss over all swaptions."""
     keys = swaption_keys if swaption_keys is not None else list(mkt.swaptions.keys())
@@ -1269,7 +1311,17 @@ def compute_total_loss(
 
         mc_prices = compute_swaption_prices(S_T, swn)
 
-        loss_vw = compute_loss_vegaweighted(mc_prices, swn)
+        if atm_only:
+            atm_mask = (swn.strikes - swn.S0).abs() < ATM_TOL
+            if atm_mask.sum() > 0:
+                loss_vw = ((mc_prices[atm_mask] - swn.target_prices[atm_mask])
+                           / (swn.vegas[atm_mask] + 1e-30)) ** 2
+                loss_vw = loss_vw.sum()
+            else:
+                loss_vw = torch.tensor(0.0, dtype=torch.float64,
+                                       device=params._device)
+        else:
+            loss_vw = compute_loss_vegaweighted(mc_prices, swn)
         total_loss = total_loss + loss_vw
 
         record = {
@@ -1346,6 +1398,7 @@ def calibrate(
     early_stop_tol: float = 1e-4,
     H_lr_factor: float = 1.0,
     grad_clip_norm: float = 10.0,
+    atm_only: bool = False,
 ) -> dict:
     """Layer 7: Run the calibration loop."""
     effective_scheme = scheme if scheme is not None else ("exact" if use_exact else "approx")
@@ -1411,6 +1464,7 @@ def calibrate(
             scheme=scheme,
             hybrid_kappa=hybrid_kappa,
             compute_diagnostics=is_log_step,
+            atm_only=atm_only,
         )
 
         loss = result["loss"]

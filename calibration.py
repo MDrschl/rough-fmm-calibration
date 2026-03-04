@@ -1,4 +1,5 @@
 import sys
+import os
 import time
 import copy
 import numpy as np
@@ -23,17 +24,30 @@ from main import (
     ATM_TOL,
 )
 
+# =============================================================================
+# Configuration
+# =============================================================================
+
 CONFIG = {
+    # --- Data ---
     "data_file": "usd_swaption_data.pkl",
     "subset": "joint_all_smiles",
     "in_sample_date": "2024-12-09",
     "out_sample_date": "2024-12-10",
     "device": "cpu",
 
-    "mode": "hybrid",
+    # --- Calibration mode ---
+    #   "hybrid"            — Mode A: single-stage BLP, H differentiable
+    #   "hybrid_two_stage"  — Mode C: two-stage BLP both stages, H frozen in S2
+    #   "two_stage"         — Mode B: legacy, approx S1 → exact Cholesky S2
+    #   "adachi"            — Mode D: Adachi-style, 1Y smiles → ρ_{ij} from ATM
+    #   "roughness"         — Mode E: ablation study, H free vs H = 0.5
+    #   "cross"             — Mode F: train/test split cross-validation
+    "mode": "two_stage",
 
+    # --- Mode A: Single-stage hybrid ---
     "hybrid": {
-        "iterations": 1200,
+        "iterations": 800,
         "lr": 3e-3,
         "N_paths": 30_000,
         "M": 100,
@@ -42,50 +56,176 @@ CONFIG = {
         "keys": None,
         "scheduler": "cosine",
         "warmup_steps": 50,
+        "cosine_power": 0.5,
         "early_stop_patience": 200,
-        "H_lr_factor": 0.2,
+        "H_lr_factor": 0.5,
         "grad_clip_norm": 1.0,
     },
 
-    "stage1": {
-        "iterations": 800,
-        "lr": 5e-3,
-        "N_paths": 10_000,
-        "M": 50,
-        "keys": None,
-    },
-    "stage2": {
-        "iterations": 800,
-        "lr": 5e-3,
-        "N_paths": 30_000,
-        "M": 50,
-        "variance_mode": "full",
-        "keys": None,
-        "scheduler": "cosine",
-        "warmup_steps": 30,
-        "cosine_power": 0.5,
+    # --- Mode C: Hybrid two-stage ---
+    "hybrid_two_stage": {
+        "stage1": {
+            "iterations": 400,
+            "lr": 5e-3,
+            "N_paths": 20_000,
+            "M": 50,
+            "kappa": 3,
+            "variance_mode": "simplified",
+            "keys": None,
+            "scheduler": "cosine",
+            "warmup_steps": 30,
+            "cosine_power": 0.5,
+            "H_lr_factor": 0.5,
+            "grad_clip_norm": 1.0,
+        },
+        "stage2": {
+            "iterations": 600,
+            "lr": 1e-3,
+            "N_paths": 30_000,
+            "M": 100,
+            "kappa": 3,
+            "variance_mode": "full",
+            "keys": None,
+            "scheduler": "cosine",
+            "warmup_steps": 30,
+            "cosine_power": 0.5,
+            "grad_clip_norm": 1.0,
+        },
     },
 
+    # --- Mode B: Legacy two-stage ---
+    "two_stage": {
+        "stage1": {
+            "iterations": 800,
+            "lr": 5e-3,
+            "N_paths": 10_000,
+            "M": 50,
+            "keys": None,
+        },
+        "stage2": {
+            "iterations": 800,
+            "lr": 5e-3,
+            "N_paths": 30_000,
+            "M": 50,
+            "variance_mode": "full",
+            "keys": None,
+            "scheduler": "cosine",
+            "warmup_steps": 30,
+            "cosine_power": 0.5,
+        },
+    },
+
+    # --- Mode D: Adachi-style separated calibration ---
+    "adachi": {
+        "stage1": {
+            # 1Y-tenor smiles: H, η, α, ρ₀ free; ρ frozen
+            "iterations": 600,
+            "lr": 3e-3,
+            "N_paths": 30_000,
+            "M": 100,
+            "kappa": 3,
+            "variance_mode": "full",
+            "scheduler": "cosine",
+            "warmup_steps": 30,
+            "cosine_power": 0.5,
+            "H_lr_factor": 0.5,
+            "grad_clip_norm": 1.0,
+        },
+        "stage2": {
+            # Co-terminal ATM: only ω (ρ_{ij}) free; H, η, α, ρ₀ frozen
+            "iterations": 400,
+            "lr": 1e-3,
+            "N_paths": 30_000,
+            "M": 100,
+            "kappa": 3,
+            "variance_mode": "full",
+            "scheduler": "cosine",
+            "warmup_steps": 20,
+            "cosine_power": 0.5,
+            "grad_clip_norm": 1.0,
+        },
+    },
+
+    # --- Mode E: Roughness ablation (H free vs H = 0.5) ---
+    "roughness": {
+        "rough_results_file": "amcc_calibration_results.pt",
+        "h05": {
+            "eta_init": 1.5,
+            "iterations": 1200,
+            "lr": 5e-3,
+            "N_paths": 30_000,
+            "M": 50,
+            "variance_mode": "full",
+            "scheduler": "cosine",
+            "warmup_steps": 50,
+            "cosine_power": 0.5,
+            "early_stop_patience": 200,
+        },
+    },
+
+    # --- Mode F: Cross-validation (train/test split) ---
+    "cross": {
+        "test_keys": [
+            (1.0, 3), (1.0, 7),
+            (3.0, 2), (3.0, 7),
+            (5.0, 3),
+            (7.0, 2),
+        ],
+        "stage1": {
+            "iterations": 400,
+            "lr": 5e-3,
+            "N_paths": 20_000,
+            "M": 50,
+            "kappa": 3,
+            "variance_mode": "simplified",
+            "keys": None,
+            "scheduler": "cosine",
+            "warmup_steps": 30,
+            "cosine_power": 0.5,
+            "H_lr_factor": 0.5,
+            "grad_clip_norm": 1.0,
+        },
+        "stage2": {
+            "iterations": 600,
+            "lr": 1e-3,
+            "N_paths": 30_000,
+            "M": 100,
+            "kappa": 3,
+            "variance_mode": "full",
+            "keys": None,
+            "scheduler": "cosine",
+            "warmup_steps": 30,
+            "cosine_power": 0.5,
+            "grad_clip_norm": 1.0,
+        },
+    },
+
+    # --- Shared ---
     "early_stop_patience": 150,
     "early_stop_tol": 1e-4,
+    "crn_seed": 42,
 
+    # --- Diagnostics ---
     "diag_N_paths": 100_000,
     "diag_M": 100,
-    "diag_scheme": "exact",
+    "diag_scheme": "auto",
     "diag_hybrid_kappa": 3,
-
-    "crn_seed": 42,
 }
 
+
+# =============================================================================
+# Helpers
+# =============================================================================
+
 def _softplus_inv(a):
-    """Numerically stable inverse of softplus: x = a + log(1 - exp(-a))."""
     a = float(a)
     if a > 20.0:
         return a
     return a + np.log(-np.expm1(-a))
 
+
 def _interpolate_alpha(alpha, matched_indices):
-    """Fill unmatched α values by linear interpolation with flat extrapolation,"""
+    """Fill unmatched α values by linear interpolation with flat extrapolation."""
     alpha = alpha.clone()
     N = alpha.shape[0]
     anchors = sorted(matched_indices)
@@ -105,8 +245,65 @@ def _interpolate_alpha(alpha, matched_indices):
 
     return alpha
 
+
+def _rematch_alpha(params, mkt, cfg, N_paths=None, M=None, label=""):
+    """MC-based Brent α re-matching to ATM levels. Modifies params in-place."""
+    N_paths = N_paths or cfg["diag_N_paths"]
+    M = M or cfg["diag_M"]
+
+    if label:
+        print(f"\n--- {label} ---")
+
+    with torch.no_grad():
+        p = params()
+        smile_keys = sorted([k for k in mkt.swaptions.keys() if k[1] == 1])
+        alpha_rematched = match_all_alphas(
+            mkt, p["H"], p["eta"], p["rho0"], p["rho"],
+            alpha_init=p["alpha"],
+            smile_keys=smile_keys,
+            variance_curve_mode="full",
+            method="mc",
+            N_paths=N_paths,
+            M=M,
+            seed=cfg["crn_seed"],
+        )
+
+        matched_indices = []
+        for key in smile_keys:
+            swn = mkt.swaptions[key]
+            if swn.J - swn.I == 1:
+                matched_indices.append(swn.I)
+
+        if matched_indices:
+            alpha_rematched = _interpolate_alpha(
+                alpha_rematched, matched_indices)
+
+        for j in range(mkt.N):
+            a = alpha_rematched[j].item()
+            params.alpha_tilde.data[j] = _softplus_inv(a)
+
+        p_new = params()
+        print(f"  α = [{', '.join(f'{a:.4f}' for a in p_new['alpha'].numpy())}]")
+
+
+def _resolve_diag_scheme(cfg):
+    """Resolve diag_scheme='auto' based on calibration mode."""
+    raw = cfg.get("diag_scheme", "exact")
+    if raw == "auto":
+        scheme = "hybrid" if cfg["mode"] in (
+            "hybrid", "hybrid_two_stage", "adachi", "cross") else "exact"
+        print(f"  diag_scheme=auto → resolved to '{scheme}' "
+              f"(matches calibration mode)")
+        return scheme
+    return raw
+
+
+# =============================================================================
+# Initialisation
+# =============================================================================
+
 def initialise_params(mkt, H_init=0.20, eta_init=2.3):
-    """Create parameter module and warm-start ALL α values."""
+    """Create parameter module and warm-start all α via formula-based ATM matching."""
     params = MappedRoughSABRParams(N=mkt.N, device=mkt.device)
     params.set_H(H_init)
     params.set_eta(eta_init)
@@ -185,11 +382,476 @@ def initialise_params(mkt, H_init=0.20, eta_init=2.3):
 
     return params
 
+
+def initialise_h05(mkt, eta_init=1.5):
+    """Create parameter module with H fixed at 0.5 (Markovian SABR)."""
+    params = MappedRoughSABRParams(N=mkt.N, device=mkt.device)
+    params.set_H(0.5)
+    params.fix_H()
+    params.set_eta(eta_init)
+
+    with torch.no_grad():
+        p = params()
+
+        smile_keys_1y = sorted([k for k in mkt.swaptions.keys() if k[1] == 1])
+        alpha_matched = match_all_alphas(
+            mkt, p["H"], p["eta"], p["rho0"], p["rho"],
+            alpha_init=p["alpha"],
+            smile_keys=smile_keys_1y,
+            variance_curve_mode="simplified",
+            method="formula",
+        )
+
+        matched_indices = []
+        for key in smile_keys_1y:
+            swn = mkt.swaptions[key]
+            if swn.J - swn.I == 1:
+                matched_indices.append(swn.I)
+
+        alpha_final = _interpolate_alpha(alpha_matched, matched_indices)
+
+        for j in range(mkt.N):
+            a = alpha_final[j].item()
+            params.alpha_tilde.data[j] = _softplus_inv(a)
+
+    with torch.no_grad():
+        p = params()
+        print(f"\n  H=0.5 initialisation:")
+        print(f"    H     = {p['H'].item():.4f}  [FIXED]")
+        print(f"    η     = {p['eta'].item():.4f}  (= κ when H=0.5)")
+        print(f"    α     = [{', '.join(f'{a:.4f}' for a in p['alpha'].numpy())}]")
+
+    return params
+
+
+# =============================================================================
+# Calibration modes
+# =============================================================================
+
+def _run_hybrid_stage(params, mkt, cfg, scfg, *,
+                      freeze_H=False, crn_offset=0, label=""):
+    """Run a single hybrid BLP calibration stage. Shared by Modes A and C."""
+    print(f"\n{'=' * 60}")
+    h_status = (f"H frozen at {params.get_H().item():.4f}"
+                if freeze_H else "H differentiable")
+    print(f"{label}: Hybrid BLP (κ={scfg['kappa']}), {h_status}")
+    print("=" * 60)
+    print(f"  {scfg['iterations']} iterations, {scfg['N_paths']:,} paths, "
+          f"{scfg['M']} steps, lr={scfg['lr']}")
+
+    if freeze_H:
+        params.fix_H()
+    else:
+        params.unfix_H()
+
+    h_lr = scfg.get("H_lr_factor", 1.0)
+    gc = scfg.get("grad_clip_norm", 10.0)
+    if not freeze_H and h_lr != 1.0:
+        print(f"  H_lr_factor={h_lr}, grad_clip_norm={gc}")
+
+    result = calibrate(
+        params, mkt,
+        n_iterations=scfg["iterations"],
+        lr=scfg["lr"],
+        N_paths=scfg["N_paths"],
+        M=scfg["M"],
+        scheme="hybrid",
+        hybrid_kappa=scfg["kappa"],
+        variance_curve_mode=scfg["variance_mode"],
+        use_crn=True,
+        crn_seed=cfg["crn_seed"] + crn_offset,
+        log_every=20,
+        swaption_keys=scfg["keys"],
+        scheduler_type=scfg.get("scheduler", "cosine"),
+        warmup_steps=scfg.get("warmup_steps", 30),
+        cosine_power=scfg.get("cosine_power", 0.5),
+        early_stop_patience=scfg.get("early_stop_patience",
+                                     cfg.get("early_stop_patience", 150)),
+        early_stop_tol=cfg.get("early_stop_tol", 1e-4),
+        H_lr_factor=h_lr if not freeze_H else 1.0,
+        grad_clip_norm=gc,
+    )
+
+    if result["best_state"] is not None:
+        params.load_state_dict(result["best_state"])
+
+    with torch.no_grad():
+        H_val = params.get_H().item()
+        eta_val = params.get_eta().item()
+        kappa_val = eta_val * np.sqrt(2.0 * H_val)
+    print(f"\n{label} complete. H = {H_val:.4f}, "
+          f"η = {eta_val:.4f}, κ = {kappa_val:.4f}")
+
+    return result
+
+
+def run_mode_a(params, mkt, cfg):
+    """Mode A: Single-stage hybrid calibration."""
+    hcfg = cfg["hybrid"]
+    result = _run_hybrid_stage(
+        params, mkt, cfg, hcfg,
+        freeze_H=False, label="HYBRID")
+
+    _rematch_alpha(params, mkt, cfg,
+                   label="Post-calibration α re-matching (MC-based Brent)")
+
+    return {"history": result["history"]}
+
+
+def run_mode_c(params, mkt, cfg):
+    """Mode C: Hybrid two-stage calibration (recommended)."""
+    h2cfg = cfg["hybrid_two_stage"]
+
+    stage1_result = _run_hybrid_stage(
+        params, mkt, cfg, h2cfg["stage1"],
+        freeze_H=False, crn_offset=0, label="STAGE 1")
+
+    _rematch_alpha(params, mkt, cfg, N_paths=50_000, M=h2cfg["stage2"]["M"],
+                   label="Inter-stage α re-matching (MC-based Brent)")
+
+    stage2_result = _run_hybrid_stage(
+        params, mkt, cfg, h2cfg["stage2"],
+        freeze_H=True, crn_offset=10000, label="STAGE 2")
+
+    _rematch_alpha(params, mkt, cfg,
+                   label="Post-calibration α re-matching (MC-based Brent)")
+
+    return {
+        "stage1": stage1_result,
+        "stage2": stage2_result,
+    }
+
+
+def run_mode_b(params, mkt, cfg):
+    """Mode B: Legacy two-stage calibration (approx → exact Cholesky)."""
+    s1cfg = cfg["two_stage"]["stage1"]
+    s2cfg = cfg["two_stage"]["stage2"]
+
+    result = calibrate_two_stage(
+        params, mkt,
+        stage1_iterations=s1cfg["iterations"],
+        stage1_lr=s1cfg["lr"],
+        stage1_N_paths=s1cfg["N_paths"],
+        stage1_M=s1cfg["M"],
+        stage1_keys=s1cfg["keys"],
+        stage2_iterations=s2cfg["iterations"],
+        stage2_lr=s2cfg["lr"],
+        stage2_N_paths=s2cfg["N_paths"],
+        stage2_M=s2cfg["M"],
+        stage2_variance_mode=s2cfg["variance_mode"],
+        stage2_keys=s2cfg["keys"],
+        stage2_scheduler=s2cfg.get("scheduler", "cosine"),
+        stage2_warmup_steps=s2cfg.get("warmup_steps", 30),
+        stage2_cosine_power=s2cfg.get("cosine_power", 0.5),
+        use_crn=True,
+        crn_seed=cfg["crn_seed"],
+        log_every=20,
+        early_stop_patience=cfg.get("early_stop_patience", 150),
+        early_stop_tol=cfg.get("early_stop_tol", 1e-4),
+    )
+
+    return result
+
+
+def run_mode_d(params, mkt, cfg):
+    """Mode D: Adachi-style separated calibration.
+
+    Stage 1: Calibrate H, η, α, ρ₀ from 1Y-tenor smiles (single-rate
+             swaptions where ρ_{ij} is irrelevant). Inter-rate correlations
+             ρ are frozen via gradient hook.
+    Stage 2: Calibrate ρ_{ij} (ω angles) from co-terminal ATM swaptions
+             (multi-rate, where ρ_{ij} governs the ATM level). All other
+             parameters frozen; ρ₀ frozen via gradient hook.
+    """
+    dcfg = cfg["adachi"]
+    s1cfg = dcfg["stage1"]
+    s2cfg = dcfg["stage2"]
+
+    # --- Identify instrument groups ---
+    keys_1y = sorted([k for k in mkt.swaptions.keys() if k[1] == 1])
+    keys_multi = sorted([k for k in mkt.swaptions.keys() if k[1] > 1])
+
+    print(f"\n  1Y-tenor keys (Stage 1): {keys_1y}")
+    print(f"  Multi-rate keys (Stage 2): {keys_multi}")
+
+    # =====================================================================
+    # Stage 1: 1Y-tenor smiles → H, η, α, ρ₀
+    # =====================================================================
+    print(f"\n{'=' * 60}")
+    print("STAGE 1 (Adachi): 1Y-tenor smiles — H, η, α, ρ₀ free")
+    print("=" * 60)
+    print(f"  {s1cfg['iterations']} iterations, {s1cfg['N_paths']:,} paths, "
+          f"{s1cfg['M']} steps, lr={s1cfg['lr']}")
+
+    params.unfix_H()
+
+    # Freeze inter-rate correlations ρ_{ij} via gradient hook on ω[:, 1:]
+    # (ρ₀ remains free via ω[:, 0])
+    rho_hook = params.register_freeze_rho_hook()
+
+    h_lr = s1cfg.get("H_lr_factor", 1.0)
+    gc = s1cfg.get("grad_clip_norm", 10.0)
+    if h_lr != 1.0:
+        print(f"  H_lr_factor={h_lr}, grad_clip_norm={gc}")
+
+    stage1_result = calibrate(
+        params, mkt,
+        n_iterations=s1cfg["iterations"],
+        lr=s1cfg["lr"],
+        N_paths=s1cfg["N_paths"],
+        M=s1cfg["M"],
+        scheme="hybrid",
+        hybrid_kappa=s1cfg["kappa"],
+        variance_curve_mode=s1cfg["variance_mode"],
+        use_crn=True,
+        crn_seed=cfg["crn_seed"],
+        log_every=20,
+        swaption_keys=keys_1y,
+        scheduler_type=s1cfg.get("scheduler", "cosine"),
+        warmup_steps=s1cfg.get("warmup_steps", 30),
+        cosine_power=s1cfg.get("cosine_power", 0.5),
+        early_stop_patience=cfg.get("early_stop_patience", 150),
+        early_stop_tol=cfg.get("early_stop_tol", 1e-4),
+        H_lr_factor=h_lr,
+        grad_clip_norm=gc,
+    )
+
+    rho_hook.remove()
+
+    if stage1_result["best_state"] is not None:
+        params.load_state_dict(stage1_result["best_state"])
+
+    with torch.no_grad():
+        H_val = params.get_H().item()
+        eta_val = params.get_eta().item()
+        kappa_val = eta_val * np.sqrt(2.0 * H_val)
+    print(f"\nStage 1 complete. H = {H_val:.4f}, "
+          f"η = {eta_val:.4f}, κ = {kappa_val:.4f}")
+
+    # Inter-stage α re-match
+    _rematch_alpha(params, mkt, cfg,
+                   label="Inter-stage α re-matching (MC-based Brent)")
+
+    # =====================================================================
+    # Stage 2: Co-terminal ATM swaptions → ρ_{ij}
+    # =====================================================================
+    print(f"\n{'=' * 60}")
+    print("STAGE 2 (Adachi): Multi-rate ATM swaptions — only ω (ρ_{ij}) free")
+    print("=" * 60)
+    print(f"  {s2cfg['iterations']} iterations, {s2cfg['N_paths']:,} paths, "
+          f"{s2cfg['M']} steps, lr={s2cfg['lr']}")
+
+    # Freeze everything except ω angles
+    params.fix_H()
+    params.alpha_tilde.requires_grad_(False)
+    params.eta_tilde.requires_grad_(False)
+
+    # Freeze ρ₀ via gradient hook on ω[:, 0], keep ρ_{ij} free via ω[:, 1:]
+    rho0_hook = params.register_freeze_rho0_hook()
+
+    gc2 = s2cfg.get("grad_clip_norm", 10.0)
+
+    stage2_result = calibrate(
+        params, mkt,
+        n_iterations=s2cfg["iterations"],
+        lr=s2cfg["lr"],
+        N_paths=s2cfg["N_paths"],
+        M=s2cfg["M"],
+        scheme="hybrid",
+        hybrid_kappa=s2cfg["kappa"],
+        variance_curve_mode=s2cfg["variance_mode"],
+        use_crn=True,
+        crn_seed=cfg["crn_seed"] + 10000,
+        log_every=20,
+        swaption_keys=keys_multi,
+        scheduler_type=s2cfg.get("scheduler", "cosine"),
+        warmup_steps=s2cfg.get("warmup_steps", 20),
+        cosine_power=s2cfg.get("cosine_power", 0.5),
+        early_stop_patience=cfg.get("early_stop_patience", 150),
+        early_stop_tol=cfg.get("early_stop_tol", 1e-4),
+        grad_clip_norm=gc2,
+        atm_only=True,
+    )
+
+    rho0_hook.remove()
+
+    if stage2_result["best_state"] is not None:
+        params.load_state_dict(stage2_result["best_state"])
+
+    # Restore requires_grad for all parameters (needed for diagnostics)
+    params.unfix_H()
+    params.alpha_tilde.requires_grad_(True)
+    params.eta_tilde.requires_grad_(True)
+    # Re-freeze H at calibrated value for consistency
+    params.fix_H()
+
+    with torch.no_grad():
+        p = params()
+        print(f"\nStage 2 complete.")
+        print(f"  ρ diag check: {torch.diag(p['rho']).numpy()}")
+        print(f"  ρ₀ = [{', '.join(f'{r:.3f}' for r in p['rho0'].numpy())}]")
+
+    # Post-calibration α re-match
+    _rematch_alpha(params, mkt, cfg,
+                   label="Post-calibration α re-matching (MC-based Brent)")
+
+    return {
+        "stage1": stage1_result,
+        "stage2": stage2_result,
+    }
+
+
+def run_mode_roughness(mkt, cfg):
+    """Mode E: Roughness ablation — compare calibrated rough model to H=0.5.
+
+    Loads existing rough calibration from file, calibrates a fresh H=0.5
+    model, then runs diagnostics on both for head-to-head comparison.
+    Returns both parameter sets and the H=0.5 calibration result.
+    """
+    rcfg = cfg["roughness"]
+    h05cfg = rcfg["h05"]
+
+    # --- Load rough parameters ---
+    rough_file = rcfg["rough_results_file"]
+    if not os.path.exists(rough_file):
+        print(f"\n  {rough_file} not found.")
+        print(f"  Run a standard calibration first, then re-run with mode='roughness'.")
+        sys.exit(1)
+
+    print(f"\nLoading rough calibration from {rough_file}...")
+    saved = torch.load(rough_file, map_location=cfg["device"],
+                       weights_only=False)
+
+    params_rough = MappedRoughSABRParams(N=mkt.N, device=cfg["device"])
+    params_rough.load_state_dict(saved["params_state_dict"])
+    params_rough.fix_H()
+
+    with torch.no_grad():
+        p_r = params_rough()
+        H_rough = p_r["H"].item()
+        eta_rough = p_r["eta"].item()
+        kappa_rough = eta_rough * np.sqrt(2.0 * H_rough)
+    print(f"  H     = {H_rough:.4f}")
+    print(f"  η     = {eta_rough:.4f}")
+    print(f"  κ     = {kappa_rough:.4f}")
+    print(f"  α     = [{', '.join(f'{a:.4f}' for a in p_r['alpha'].numpy())}]")
+
+    # --- Calibrate H=0.5 model ---
+    print("\n" + "#" * 60)
+    print("# MARKOVIAN SPECIAL CASE (H = 0.5)")
+    print("#" * 60)
+
+    params_h05 = initialise_h05(mkt, eta_init=h05cfg["eta_init"])
+
+    print(f"\n  Calibrating with H = 0.5 fixed...")
+    print(f"  {h05cfg['iterations']} iterations, {h05cfg['N_paths']:,} paths, "
+          f"{h05cfg['M']} steps, lr={h05cfg['lr']}")
+
+    result_h05 = calibrate(
+        params_h05, mkt,
+        n_iterations=h05cfg["iterations"],
+        lr=h05cfg["lr"],
+        N_paths=h05cfg["N_paths"],
+        M=h05cfg["M"],
+        use_exact=True,
+        variance_curve_mode=h05cfg["variance_mode"],
+        use_crn=True,
+        crn_seed=cfg["crn_seed"],
+        log_every=20,
+        swaption_keys=None,
+        scheduler_type=h05cfg.get("scheduler", "cosine"),
+        warmup_steps=h05cfg.get("warmup_steps", 50),
+        cosine_power=h05cfg.get("cosine_power", 0.5),
+        early_stop_patience=h05cfg.get("early_stop_patience", 200),
+        early_stop_tol=1e-4,
+    )
+
+    if result_h05["best_state"] is not None:
+        params_h05.load_state_dict(result_h05["best_state"])
+
+    with torch.no_grad():
+        p_h = params_h05()
+        print(f"\n  H=0.5 calibration complete.")
+        print(f"    η     = {p_h['eta'].item():.4f}  (= κ)")
+        print(f"    α     = [{', '.join(f'{a:.4f}' for a in p_h['alpha'].numpy())}]")
+        print(f"    ρ₀    = [{', '.join(f'{r:.3f}' for r in p_h['rho0'].numpy())}]")
+
+    return {
+        "params_rough": params_rough,
+        "params_h05": params_h05,
+        "H_rough": H_rough,
+        "eta_rough": eta_rough,
+        "h05_history": result_h05["history"],
+    }
+
+
+def run_mode_cross(params, mkt, cfg):
+    """Mode F: Cross-validation with train/test split.
+
+    Splits swaptions into train and test sets. Runs hybrid two-stage
+    calibration on train keys only. Returns result with split info for
+    separate train/test diagnostics.
+    """
+    ccfg = cfg["cross"]
+
+    all_keys = sorted(mkt.swaptions.keys())
+    test_keys = [k for k in ccfg["test_keys"] if k in mkt.swaptions]
+    train_keys = [k for k in all_keys if k not in test_keys]
+
+    # 1Y-tenor keys must be in train (needed for α matching)
+    test_1y = [k for k in test_keys if k[1] == 1]
+    if test_1y:
+        print(f"  Moving 1Y-tenor test keys to train: {test_1y}")
+        for k in test_1y:
+            test_keys.remove(k)
+            train_keys.append(k)
+        train_keys.sort()
+
+    print(f"\n  Train ({len(train_keys)} swaptions — used in optimiser):")
+    for k in train_keys:
+        print(f"    {k[0]:.0f}Y×{k[1]:.0f}Y")
+    print(f"\n  Test ({len(test_keys)} swaptions — held out):")
+    for k in test_keys:
+        print(f"    {k[0]:.0f}Y×{k[1]:.0f}Y")
+
+    # Stage 1: H free, train keys only
+    s1cfg = {**ccfg["stage1"], "keys": train_keys}
+    stage1_result = _run_hybrid_stage(
+        params, mkt, cfg, s1cfg,
+        freeze_H=False, crn_offset=0, label="STAGE 1 (train)")
+
+    _rematch_alpha(params, mkt, cfg, N_paths=50_000, M=ccfg["stage2"]["M"],
+                   label="Inter-stage α re-matching (MC-based Brent)")
+
+    # Stage 2: H frozen, train keys only
+    s2cfg = {**ccfg["stage2"], "keys": train_keys}
+    stage2_result = _run_hybrid_stage(
+        params, mkt, cfg, s2cfg,
+        freeze_H=True, crn_offset=10000, label="STAGE 2 (train)")
+
+    _rematch_alpha(params, mkt, cfg,
+                   label="Post-calibration α re-matching (MC-based Brent)")
+
+    return {
+        "stage1": stage1_result,
+        "stage2": stage2_result,
+        "train_keys": train_keys,
+        "test_keys": test_keys,
+    }
+
+
+# =============================================================================
+# Diagnostics and reporting
+# =============================================================================
+
 def mc_diagnostics(params, mkt, N_paths=100_000, M=100, seed=42,
-                   scheme="exact", hybrid_kappa=2):
+                   swaption_keys=None, scheme="exact", hybrid_kappa=2,
+                   label=""):
     """Full MC-based calibration report with high path count."""
+    header = f"MC-BASED CALIBRATION REPORT — {label}" if label else \
+             "MC-BASED CALIBRATION REPORT"
     print("\n" + "=" * 72)
-    print("MC-BASED CALIBRATION REPORT")
+    print(header)
     print(f"({N_paths:,} paths, {M} time steps, scheme={scheme})")
     print("=" * 72)
 
@@ -199,11 +861,12 @@ def mc_diagnostics(params, mkt, N_paths=100_000, M=100, seed=42,
         N_paths=N_paths,
         M=M,
         seed=seed,
+        swaption_keys=swaption_keys,
         scheme=scheme,
         hybrid_kappa=hybrid_kappa,
     )
-
     return report
+
 
 def print_accuracy_summary(report, mkt, label=""):
     """Detailed accuracy breakdown from a calibration report."""
@@ -228,7 +891,6 @@ def print_accuracy_summary(report, mkt, label=""):
     by_expiry = {}
     by_tenor = {}
     all_sq, all_abs, all_signed = [], [], []
-    all_price_sq, all_price_denom = [], []
 
     for key in sorted(per_swn.keys()):
         res = per_swn[key]
@@ -327,9 +989,415 @@ def print_accuracy_summary(report, mkt, label=""):
         print(f"    {ten:.0f}Y tenor:   RMSE={r:.1f}bp  MAE={m:.1f}bp  "
               f"Bias={b:+.1f}bp  ({n_swn} swaptions)")
 
+
+def print_calibrated_params(params, mkt):
+    """Print all calibrated parameter values."""
+    print("\n" + "#" * 60)
+    print("# CALIBRATED PARAMETERS")
+    print("#" * 60)
+
+    with torch.no_grad():
+        p = params()
+        print(f"\n  H     = {p['H'].item():.4f}")
+        print(f"  η     = {p['eta'].item():.4f}")
+
+        alpha = p["alpha"].numpy()
+        print(f"\n  Volatility levels α_j:")
+        for j in range(mkt.N):
+            print(f"    α_{j+1:2d} = {alpha[j]:.4f}")
+
+        rho0 = p["rho0"].numpy()
+        print(f"\n  Spot-vol correlations ρ₀,j:")
+        for j in range(mkt.N):
+            print(f"    ρ₀,{j+1:2d} = {rho0[j]:+.4f}")
+
+        print(f"\n  Forward-rate correlation matrix ρ_ij:")
+        rho = p["rho"].numpy()
+        np.set_printoptions(precision=3, linewidth=120)
+        print(rho)
+
+
+def run_in_sample_diagnostics(params, mkt, cfg, diag_scheme, diag_kappa):
+    """Run in-sample MC diagnostics and smile comparisons."""
+    print("\n" + "#" * 60)
+    print(f"# IN-SAMPLE MC DIAGNOSTICS ({cfg['in_sample_date']})")
+    print("#" * 60)
+
+    report = mc_diagnostics(
+        params, mkt,
+        N_paths=cfg["diag_N_paths"],
+        M=cfg["diag_M"],
+        scheme=diag_scheme,
+        hybrid_kappa=diag_kappa,
+    )
+    print_accuracy_summary(report, mkt,
+                           label=f"IN-SAMPLE ({cfg['in_sample_date']})")
+
+    print("\n" + "#" * 60)
+    print("# SMILE COMPARISONS — in-sample (selected swaptions)")
+    print("#" * 60)
+
+    representative_keys = [
+        (1.0, 1), (1.0, 5), (1.0, 10),
+        (3.0, 1), (3.0, 5),
+        (5.0, 1), (5.0, 5),
+        (7.0, 1), (7.0, 3),
+        (10.0, 1),
+    ]
+    for key in representative_keys:
+        if key in mkt.swaptions:
+            print_smile_comparison(
+                params, mkt.swaptions[key], mkt,
+                variance_curve_mode="full",
+                N_paths=cfg["diag_N_paths"],
+                M=cfg["diag_M"],
+                scheme=diag_scheme,
+                hybrid_kappa=diag_kappa,
+            )
+
+    return report, representative_keys
+
+
+def run_oos_evaluation(params, mkt_oos, cfg, diag_scheme, diag_kappa,
+                       representative_keys):
+    """Run full out-of-sample evaluation with α re-matching."""
+    print("\n" + "=" * 72)
+    print("  OUT-OF-SAMPLE EVALUATION")
+    print(f"  Calibrated on: {cfg['in_sample_date']}")
+    print(f"  Evaluating on: {cfg['out_sample_date']}")
+    print("=" * 72)
+
+    print_market_summary(mkt_oos)
+
+    params_oos = copy.deepcopy(params)
+    _rematch_alpha(params_oos, mkt_oos, cfg,
+                   label="Re-matching α to out-of-sample ATM levels (MC-based)")
+
+    print(f"\n--- Out-of-sample MC report ({cfg['out_sample_date']}) ---")
+    report_oos = mc_diagnostics(
+        params_oos, mkt_oos,
+        N_paths=cfg["diag_N_paths"],
+        M=cfg["diag_M"],
+        scheme=diag_scheme,
+        hybrid_kappa=diag_kappa,
+    )
+    print_accuracy_summary(report_oos, mkt_oos,
+                           label=f"OUT-OF-SAMPLE ({cfg['out_sample_date']})")
+
+    print("\n" + "#" * 60)
+    print("# SMILE COMPARISONS — out-of-sample")
+    print("#" * 60)
+
+    for key in representative_keys:
+        if key in mkt_oos.swaptions:
+            print_smile_comparison(
+                params_oos, mkt_oos.swaptions[key], mkt_oos,
+                variance_curve_mode="full",
+                N_paths=cfg["diag_N_paths"],
+                M=cfg["diag_M"],
+                scheme=diag_scheme,
+                hybrid_kappa=diag_kappa,
+            )
+
+    return params_oos
+
+
+def compare_reports(report_rough, report_h05, mkt):
+    """Head-to-head comparison of rough vs H=0.5 calibrations.
+
+    Returns dict with total RMSE for each model, per-swaption breakdowns,
+    and win counts.
+    """
+    per_r = report_rough.get("per_swaption", {})
+    per_h = report_h05.get("per_swaption", {})
+    keys = sorted(set(per_r.keys()) & set(per_h.keys()))
+
+    if not keys:
+        print("  No common swaptions to compare.")
+        return {}
+
+    print("\n" + "=" * 100)
+    print("PER-SWAPTION COMPARISON: Rough (H free) vs Markovian (H = 0.5)")
+    print("=" * 100)
+
+    print(f"\n  {'Swaption':>10s}  {'Rough':>8s}  {'H=0.5':>8s}  "
+          f"{'ΔRMSE':>8s}  {'Rough':>8s}  {'H=0.5':>8s}  "
+          f"{'ΔATM':>8s}  {'Winner':>8s}")
+    print(f"  {'':>10s}  {'RMSE':>8s}  {'RMSE':>8s}  "
+          f"{'(bp)':>8s}  {'ATM':>8s}  {'ATM':>8s}  "
+          f"{'(bp)':>8s}  {'':>8s}")
+    print("  " + "-" * 90)
+
+    by_expiry = {}
+    by_tenor = {}
+    moneyness_buckets = {
+        "deep_ITM": {"rough": [], "h05": []},
+        "ITM":      {"rough": [], "h05": []},
+        "ATM":      {"rough": [], "h05": []},
+        "OTM":      {"rough": [], "h05": []},
+        "deep_OTM": {"rough": [], "h05": []},
+    }
+    wing_data = {
+        "left_rough": [], "left_h05": [],
+        "right_rough": [], "right_h05": [],
+    }
+
+    all_rough_sq, all_h05_sq = [], []
+    rough_wins, h05_wins = 0, 0
+    comparison_rows = []
+
+    for key in keys:
+        swn = mkt.swaptions[key]
+        res_r = per_r[key]
+        res_h = per_h[key]
+        expiry, tenor = key
+
+        valid_r = ~torch.isnan(res_r["iv_errors"])
+        valid_h = ~torch.isnan(res_h["iv_errors"])
+        valid = valid_r & valid_h
+        if valid.sum() == 0:
+            continue
+
+        err_r = res_r["iv_errors"][valid] * 10000
+        err_h = res_h["iv_errors"][valid] * 10000
+
+        rmse_r = np.sqrt((err_r.numpy() ** 2).mean())
+        rmse_h = np.sqrt((err_h.numpy() ** 2).mean())
+        delta_rmse = rmse_h - rmse_r
+
+        atm_mask = (swn.strikes - swn.S0).abs() < ATM_TOL
+        atm_r = (res_r["iv_errors"][atm_mask][0].item() * 10000
+                 if atm_mask.sum() > 0 else float('nan'))
+        atm_h = (res_h["iv_errors"][atm_mask][0].item() * 10000
+                 if atm_mask.sum() > 0 else float('nan'))
+        delta_atm = abs(atm_h) - abs(atm_r)
+
+        winner = "Rough" if rmse_r < rmse_h else "H=0.5"
+        if rmse_r < rmse_h:
+            rough_wins += 1
+        else:
+            h05_wins += 1
+
+        print(f"  {expiry:.0f}Y×{tenor:.0f}Y  "
+              f"{rmse_r:8.1f}  {rmse_h:8.1f}  {delta_rmse:+8.1f}  "
+              f"{atm_r:+8.1f}  {atm_h:+8.1f}  {delta_atm:+8.1f}  "
+              f"{winner:>8s}")
+
+        comparison_rows.append({
+            "key": key, "rmse_rough": rmse_r, "rmse_h05": rmse_h,
+            "delta": delta_rmse, "atm_rough": atm_r, "atm_h05": atm_h,
+        })
+
+        sq_r = (err_r.numpy() ** 2).tolist()
+        sq_h = (err_h.numpy() ** 2).tolist()
+        all_rough_sq.extend(sq_r)
+        all_h05_sq.extend(sq_h)
+
+        by_expiry.setdefault(expiry, {"rough_sq": [], "h05_sq": []})
+        by_expiry[expiry]["rough_sq"].extend(sq_r)
+        by_expiry[expiry]["h05_sq"].extend(sq_h)
+
+        by_tenor.setdefault(tenor, {"rough_sq": [], "h05_sq": []})
+        by_tenor[tenor]["rough_sq"].extend(sq_r)
+        by_tenor[tenor]["h05_sq"].extend(sq_h)
+
+        offsets = ((swn.strikes - swn.S0) * 10000).numpy()
+        for i_s in range(swn.n_strikes):
+            if not valid[i_s]:
+                continue
+            off = offsets[i_s]
+            e_r = res_r["iv_errors"][i_s].item() * 10000
+            e_h = res_h["iv_errors"][i_s].item() * 10000
+
+            if off <= -100:
+                bucket = "deep_ITM"
+            elif off <= -25:
+                bucket = "ITM"
+            elif off < 25:
+                bucket = "ATM"
+            elif off < 100:
+                bucket = "OTM"
+            else:
+                bucket = "deep_OTM"
+            moneyness_buckets[bucket]["rough"].append(e_r ** 2)
+            moneyness_buckets[bucket]["h05"].append(e_h ** 2)
+
+            if off < -ATM_TOL * 10000:
+                wing_data["left_rough"].append(e_r)
+                wing_data["left_h05"].append(e_h)
+            elif off > ATM_TOL * 10000:
+                wing_data["right_rough"].append(e_r)
+                wing_data["right_h05"].append(e_h)
+
+    print("  " + "-" * 90)
+    total_r = np.sqrt(np.mean(all_rough_sq))
+    total_h = np.sqrt(np.mean(all_h05_sq))
+    delta_total = total_h - total_r
+    print(f"  {'TOTAL':>10s}  {total_r:8.1f}  {total_h:8.1f}  "
+          f"{delta_total:+8.1f}  {'':>8s}  {'':>8s}  {'':>8s}  "
+          f"{'Rough' if total_r < total_h else 'H=0.5':>8s}")
+    print(f"\n  Rough wins {rough_wins}/{len(keys)} swaptions, "
+          f"H=0.5 wins {h05_wins}/{len(keys)}")
+
+    print(f"\n  {'BREAKDOWN BY EXPIRY':=^70}")
+    print(f"  {'Expiry':>8s}  {'Rough':>8s}  {'H=0.5':>8s}  "
+          f"{'ΔRMSE':>8s}  {'Rel Δ':>8s}")
+    print("  " + "-" * 50)
+
+    for exp in sorted(by_expiry.keys()):
+        d = by_expiry[exp]
+        r = np.sqrt(np.mean(d["rough_sq"]))
+        h = np.sqrt(np.mean(d["h05_sq"]))
+        delta = h - r
+        rel = delta / h * 100 if h > 0 else 0
+        print(f"  {exp:>6.0f}Y  {r:8.1f}  {h:8.1f}  "
+              f"{delta:+8.1f}  {rel:+7.1f}%")
+
+    print(f"\n  {'BREAKDOWN BY TENOR':=^70}")
+    print(f"  {'Tenor':>8s}  {'Rough':>8s}  {'H=0.5':>8s}  "
+          f"{'ΔRMSE':>8s}  {'Rel Δ':>8s}  {'#swn':>6s}")
+    print("  " + "-" * 55)
+
+    for ten in sorted(by_tenor.keys()):
+        d = by_tenor[ten]
+        r = np.sqrt(np.mean(d["rough_sq"]))
+        h = np.sqrt(np.mean(d["h05_sq"]))
+        delta = h - r
+        rel = delta / h * 100 if h > 0 else 0
+        n_swn = len([k for k in keys if k[1] == ten])
+        print(f"  {ten:>6.0f}Y  {r:8.1f}  {h:8.1f}  "
+              f"{delta:+8.1f}  {rel:+7.1f}%  {n_swn:>6d}")
+
+    bucket_labels = {
+        "deep_ITM": "Deep ITM (<=-100bp)",
+        "ITM":      "ITM (-100 to -25bp)",
+        "ATM":      "ATM (±25bp)",
+        "OTM":      "OTM (+25 to +100bp)",
+        "deep_OTM": "Deep OTM (>=+100bp)",
+    }
+    print(f"\n  {'BREAKDOWN BY MONEYNESS':=^70}")
+    print(f"  {'Bucket':>22s}  {'Rough':>8s}  {'H=0.5':>8s}  "
+          f"{'ΔRMSE':>8s}  {'Rel Δ':>8s}  {'#pts':>6s}")
+    print("  " + "-" * 65)
+
+    for bk in ["deep_ITM", "ITM", "ATM", "OTM", "deep_OTM"]:
+        r_sq = moneyness_buckets[bk]["rough"]
+        h_sq = moneyness_buckets[bk]["h05"]
+        if not r_sq:
+            continue
+        r = np.sqrt(np.mean(r_sq))
+        h = np.sqrt(np.mean(h_sq))
+        delta = h - r
+        rel = delta / h * 100 if h > 0 else 0
+        print(f"  {bucket_labels[bk]:>22s}  {r:8.1f}  {h:8.1f}  "
+              f"{delta:+8.1f}  {rel:+7.1f}%  {len(r_sq):>6d}")
+
+    print(f"\n  {'WING BIAS COMPARISON':=^70}")
+    for side, label in [("left", "Left wing (K < S0)"),
+                        ("right", "Right wing (K > S0)")]:
+        r_arr = np.array(wing_data[f"{side}_rough"])
+        h_arr = np.array(wing_data[f"{side}_h05"])
+        if len(r_arr) == 0:
+            continue
+        r_bias = r_arr.mean()
+        h_bias = h_arr.mean()
+        r_rmse = np.sqrt((r_arr ** 2).mean())
+        h_rmse = np.sqrt((h_arr ** 2).mean())
+        print(f"  {label}:")
+        print(f"    Rough:  bias={r_bias:+.1f}bp  RMSE={r_rmse:.1f}bp")
+        print(f"    H=0.5:  bias={h_bias:+.1f}bp  RMSE={h_rmse:.1f}bp")
+        print(f"    ΔRMSE: {h_rmse - r_rmse:+.1f}bp")
+
+    return {
+        "total_rmse_rough": total_r,
+        "total_rmse_h05": total_h,
+        "delta_total": delta_total,
+        "by_expiry": by_expiry,
+        "by_tenor": by_tenor,
+        "moneyness": moneyness_buckets,
+        "per_swaption": comparison_rows,
+        "rough_wins": rough_wins,
+        "h05_wins": h05_wins,
+    }
+
+
+def run_cross_diagnostics(params, mkt, cfg, diag_scheme, diag_kappa,
+                          train_keys, test_keys):
+    """Run separate MC diagnostics on train and test sets."""
+    print("\n" + "#" * 60)
+    print(f"# TRAIN SET MC DIAGNOSTICS ({len(train_keys)} swaptions)")
+    print("#" * 60)
+
+    report_train = mc_diagnostics(
+        params, mkt,
+        N_paths=cfg["diag_N_paths"],
+        M=cfg["diag_M"],
+        swaption_keys=train_keys,
+        label=f"TRAIN ({len(train_keys)} swaptions)",
+        scheme=diag_scheme,
+        hybrid_kappa=diag_kappa,
+    )
+    print_accuracy_summary(report_train, mkt, label="TRAIN")
+
+    print("\n" + "#" * 60)
+    print(f"# TEST SET MC DIAGNOSTICS ({len(test_keys)} swaptions — held out)")
+    print("#" * 60)
+
+    report_test = mc_diagnostics(
+        params, mkt,
+        N_paths=cfg["diag_N_paths"],
+        M=cfg["diag_M"],
+        swaption_keys=test_keys,
+        label=f"TEST ({len(test_keys)} swaptions, held out)",
+        scheme=diag_scheme,
+        hybrid_kappa=diag_kappa,
+    )
+    print_accuracy_summary(report_test, mkt, label="TEST (held out)")
+
+    print("\n" + "#" * 60)
+    print("# SMILE COMPARISONS — TRAIN")
+    print("#" * 60)
+
+    for key in train_keys:
+        if key in mkt.swaptions:
+            print_smile_comparison(
+                params, mkt.swaptions[key], mkt,
+                variance_curve_mode="full",
+                N_paths=cfg["diag_N_paths"],
+                M=cfg["diag_M"],
+                scheme=diag_scheme,
+                hybrid_kappa=diag_kappa,
+            )
+
+    print("\n" + "#" * 60)
+    print("# SMILE COMPARISONS — TEST (held out)")
+    print("#" * 60)
+
+    for key in test_keys:
+        if key in mkt.swaptions:
+            print_smile_comparison(
+                params, mkt.swaptions[key], mkt,
+                variance_curve_mode="full",
+                N_paths=cfg["diag_N_paths"],
+                M=cfg["diag_M"],
+                scheme=diag_scheme,
+                hybrid_kappa=diag_kappa,
+            )
+
+    return report_train, report_test
+
+
+# =============================================================================
+# Plotting
+# =============================================================================
+
 def save_smile_plots(params, mkt, config, filename="amcc_smile_fits.png",
-                     suptitle=None):
-    """Generate smile-fit plots for all swaptions in mkt."""
+                     suptitle=None, test_keys=None):
+    """Generate smile-fit plots for all swaptions.
+
+    If test_keys is given, test swaptions are plotted in blue with [TEST]
+    labels; train swaptions in red.
+    """
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -337,6 +1405,8 @@ def save_smile_plots(params, mkt, config, filename="amcc_smile_fits.png",
     except ImportError:
         print("matplotlib not available, skipping plots")
         return
+
+    test_set = set(test_keys) if test_keys else set()
 
     keys_by_maturity = {}
     for key in sorted(mkt.swaptions.keys()):
@@ -356,8 +1426,14 @@ def save_smile_plots(params, mkt, config, filename="amcc_smile_fits.png",
         fig.suptitle(suptitle, fontsize=13, fontweight="bold", y=1.01)
 
     cholesky_cache = {}
-    diag_scheme = config.get("diag_scheme", "exact")
-    diag_kappa = config.get("diag_hybrid_kappa", 2)
+    raw_scheme = config.get("diag_scheme", "exact")
+    if raw_scheme == "auto":
+        diag_scheme = "hybrid" if config.get("mode") in (
+            "hybrid", "hybrid_two_stage", "adachi", "cross") else "exact"
+    else:
+        diag_scheme = raw_scheme
+    diag_kappa = config.get("diag_hybrid_kappa", 3)
+
     with torch.no_grad():
         for row_idx, mat in enumerate(maturities):
             keys = keys_by_maturity[mat]
@@ -382,11 +1458,15 @@ def save_smile_plots(params, mkt, config, filename="amcc_smile_fits.png",
                 mkt_ivs = swn.ivs_black.numpy() * 100
                 mod_ivs = model_ivs.numpy() * 100
 
+                is_test = key in test_set
+                model_color = "blue" if is_test else "red"
                 ax.plot(strikes_pct, mkt_ivs, "o-", color="black",
                         markersize=3, linewidth=0.5, label="Market")
-                ax.plot(strikes_pct, mod_ivs, "x-", color="red",
+                ax.plot(strikes_pct, mod_ivs, "x-", color=model_color,
                         markersize=4, linewidth=0.5, label="Model")
-                ax.set_title(f"{key[0]:.0f}Y × {key[1]:.0f}Y", fontsize=10)
+
+                tag = " [TEST]" if is_test else ""
+                ax.set_title(f"{key[0]:.0f}Y × {key[1]:.0f}Y{tag}", fontsize=10)
                 ax.set_xlabel("Strike (%)", fontsize=8)
                 ax.set_ylabel("IV (%)", fontsize=8)
                 ax.set_ylim(bottom=0)
@@ -403,8 +1483,143 @@ def save_smile_plots(params, mkt, config, filename="amcc_smile_fits.png",
     print(f"Saved: {filename}")
     plt.close(fig)
 
-def save_plots(params, mkt, history, config, history2=None):
-    """Generate and save calibration diagnostic plots:"""
+
+def save_comparison_plots(params_rough, params_h05, mkt, cfg):
+    """Side-by-side smile fits and RMSE bar chart: rough vs H=0.5."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("matplotlib not available, skipping plots")
+        return
+
+    diag_scheme = cfg.get("diag_scheme", "exact")
+    diag_kappa = cfg.get("diag_hybrid_kappa", 3)
+    if diag_scheme == "auto":
+        diag_scheme = "hybrid"
+
+    keys_by_maturity = {}
+    for key in sorted(mkt.swaptions.keys()):
+        keys_by_maturity.setdefault(key[0], []).append(key)
+
+    maturities = sorted(keys_by_maturity.keys())
+    n_mat = len(maturities)
+    max_per_row = max(len(v) for v in keys_by_maturity.values())
+
+    fig, axes = plt.subplots(
+        n_mat, max_per_row,
+        figsize=(4.5 * max_per_row, 3.5 * n_mat),
+        squeeze=False,
+    )
+    fig.suptitle(
+        "Roughness ablation: Rough (H free) vs Markovian (H = 0.5)",
+        fontsize=13, fontweight="bold", y=1.01,
+    )
+
+    cache_r, cache_h = {}, {}
+    with torch.no_grad():
+        for row_idx, mat in enumerate(maturities):
+            keys_row = keys_by_maturity[mat]
+            for col_idx, key in enumerate(keys_row):
+                ax = axes[row_idx, col_idx]
+                swn = mkt.swaptions[key]
+                strikes_pct = swn.strikes.numpy() * 100
+                mkt_ivs = swn.ivs_black.numpy() * 100
+
+                torch.manual_seed(cfg["crn_seed"])
+                S_T_r = simulate_swaption(
+                    params_rough, swn, mkt,
+                    N_paths=50_000, M=80,
+                    use_exact=(diag_scheme == "exact"),
+                    variance_curve_mode="full",
+                    cholesky_cache=cache_r,
+                    scheme=diag_scheme, hybrid_kappa=diag_kappa,
+                )
+                mod_r = mc_prices_to_black_iv(
+                    compute_swaption_prices(S_T_r, swn), swn).numpy() * 100
+
+                torch.manual_seed(cfg["crn_seed"])
+                S_T_h = simulate_swaption(
+                    params_h05, swn, mkt,
+                    N_paths=50_000, M=80,
+                    use_exact=True,
+                    variance_curve_mode="full",
+                    cholesky_cache=cache_h,
+                    scheme="exact", hybrid_kappa=diag_kappa,
+                )
+                mod_h = mc_prices_to_black_iv(
+                    compute_swaption_prices(S_T_h, swn), swn).numpy() * 100
+
+                ax.plot(strikes_pct, mkt_ivs, "o-", color="black",
+                        markersize=3, linewidth=0.5, label="Market")
+                ax.plot(strikes_pct, mod_r, "x-", color="blue",
+                        markersize=4, linewidth=0.5, label="Rough")
+                ax.plot(strikes_pct, mod_h, "x-", color="red",
+                        markersize=4, linewidth=0.5, label="H=0.5")
+                ax.set_title(f"{key[0]:.0f}Y × {key[1]:.0f}Y", fontsize=10)
+                ax.set_xlabel("Strike (%)", fontsize=8)
+                ax.set_ylabel("IV (%)", fontsize=8)
+                ax.set_ylim(bottom=0)
+                ax.tick_params(labelsize=7)
+                ax.grid(True, alpha=0.3)
+                if row_idx == 0 and col_idx == 0:
+                    ax.legend(fontsize=7)
+
+            for col_idx in range(len(keys_row), max_per_row):
+                axes[row_idx, col_idx].set_visible(False)
+
+    plt.tight_layout()
+    plt.savefig("roughness_ablation_smiles.png", dpi=150)
+    print("Saved: roughness_ablation_smiles.png")
+    plt.close(fig)
+
+    # RMSE bar chart
+    fig, ax = plt.subplots(figsize=(12, 5))
+    all_keys = sorted(mkt.swaptions.keys())
+    labels = [f"{k[0]:.0f}Y×{k[1]:.0f}Y" for k in all_keys]
+
+    rmse_r_list, rmse_h_list = [], []
+    for key in all_keys:
+        swn = mkt.swaptions[key]
+        res_r = compute_model_smile(
+            params_rough, swn, mkt, variance_curve_mode="full",
+            N_paths=50_000, M=80, seed=cfg["crn_seed"],
+            scheme=diag_scheme, hybrid_kappa=diag_kappa,
+        )
+        res_h = compute_model_smile(
+            params_h05, swn, mkt, variance_curve_mode="full",
+            N_paths=50_000, M=80, seed=cfg["crn_seed"],
+            scheme="exact", hybrid_kappa=diag_kappa,
+        )
+        valid = ~torch.isnan(res_r["iv_errors"]) & ~torch.isnan(res_h["iv_errors"])
+        if valid.sum() > 0:
+            rmse_r_list.append(
+                np.sqrt(((res_r["iv_errors"][valid] * 10000).numpy() ** 2).mean()))
+            rmse_h_list.append(
+                np.sqrt(((res_h["iv_errors"][valid] * 10000).numpy() ** 2).mean()))
+        else:
+            rmse_r_list.append(0)
+            rmse_h_list.append(0)
+
+    x = np.arange(len(labels))
+    w = 0.35
+    ax.bar(x - w / 2, rmse_r_list, w, label="Rough (H free)", color="steelblue")
+    ax.bar(x + w / 2, rmse_h_list, w, label="H = 0.5", color="indianred")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
+    ax.set_ylabel("RMSE (bp)")
+    ax.set_title("Per-swaption RMSE: Rough vs Markovian SABR FMM")
+    ax.legend()
+    ax.grid(True, alpha=0.3, axis="y")
+    plt.tight_layout()
+    plt.savefig("roughness_ablation_rmse_bars.png", dpi=150)
+    print("Saved: roughness_ablation_rmse_bars.png")
+    plt.close(fig)
+
+
+def save_plots(params, mkt, history, config, history2=None, test_keys=None):
+    """Generate convergence, gradient, smile, and correlation plots."""
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -421,8 +1636,8 @@ def save_plots(params, mkt, history, config, history2=None):
         s2_steps = [r["step"] + len(history) for r in history2]
         s2_loss = [r["loss"] for r in history2]
 
-        ax1.semilogy(s1_steps, s1_loss, "b-", alpha=0.7, label="Stage 1 (approx)")
-        ax1.semilogy(s2_steps, s2_loss, "r-", alpha=0.7, label="Stage 2 (exact)")
+        ax1.semilogy(s1_steps, s1_loss, "b-", alpha=0.7, label="Stage 1")
+        ax1.semilogy(s2_steps, s2_loss, "r-", alpha=0.7, label="Stage 2")
         ax1.axvline(len(history), color="gray", linestyle="--", alpha=0.5)
         ax1.set_title("Calibration convergence (two-stage)")
         ax1.legend()
@@ -460,15 +1675,22 @@ def save_plots(params, mkt, history, config, history2=None):
     plt.close(fig)
 
     all_history = history + (history2 or [])
-    has_grad_norms = any("grad_norms" in r and r["grad_norms"] for r in all_history)
-
+    has_grad_norms = any("grad_norms" in r and r["grad_norms"]
+                         for r in all_history)
     if has_grad_norms:
         _save_gradient_norm_plot(history, history2)
+
+    if test_keys:
+        suptitle = (f"Smile fits — train (red) / test (blue)  "
+                    f"[{config.get('in_sample_date', '')}]")
+    else:
+        suptitle = f"In-sample smile fits ({config.get('in_sample_date', '')})"
 
     save_smile_plots(
         params, mkt, config,
         filename="amcc_smile_fits.png",
-        suptitle=f"In-sample smile fits ({config.get('in_sample_date', '')})",
+        suptitle=suptitle,
+        test_keys=test_keys,
     )
 
     with torch.no_grad():
@@ -489,21 +1711,23 @@ def save_plots(params, mkt, history, config, history2=None):
     print("Saved: amcc_correlation.png")
     plt.close("all")
 
+
 def _save_gradient_norm_plot(history, history2=None):
-    """Plot per-parameter gradient norms over the calibration run."""
+    """Plot per-parameter gradient norms over the calibration run.
+
+    For two-stage procedures, Stage 2 steps are offset so the x-axis is
+    continuous, and a vertical line marks the stage boundary. Zero-gradient
+    entries (frozen parameters) are excluded from plotting.
+    """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    all_history = history + (history2 or [])
+    # Build unified step/gradient arrays with proper offset
+    s1_len = len(history)
+    steps, H_grads, eta_grads, alpha_grads, omega_grads = [], [], [], [], []
 
-    steps = []
-    H_grads = []
-    eta_grads = []
-    alpha_grads = []
-    omega_grads = []
-
-    for r in all_history:
+    for i, r in enumerate(history):
         gn = r.get("grad_norms", {})
         if not gn:
             continue
@@ -513,17 +1737,47 @@ def _save_gradient_norm_plot(history, history2=None):
         alpha_grads.append(gn.get("alpha_tilde", 0.0))
         omega_grads.append(gn.get("omega_tilde", 0.0))
 
+    if history2:
+        for r in history2:
+            gn = r.get("grad_norms", {})
+            if not gn:
+                continue
+            steps.append(r["step"] + s1_len)
+            H_grads.append(gn.get("H_tilde", 0.0))
+            eta_grads.append(gn.get("eta_tilde", 0.0))
+            alpha_grads.append(gn.get("alpha_tilde", 0.0))
+            omega_grads.append(gn.get("omega_tilde", 0.0))
+
     if not steps:
         return
 
+    def _ema(steps_in, data_in, alpha=0.05):
+        """EMA that skips zeros (frozen params) and returns clean arrays."""
+        s_out, d_out = [], []
+        prev = None
+        for s, v in zip(steps_in, data_in):
+            if v <= 0:
+                continue
+            if prev is None:
+                prev = v
+            else:
+                prev = alpha * v + (1 - alpha) * prev
+            s_out.append(s)
+            d_out.append(prev)
+        return s_out, d_out
+
+    def _nonzero(steps_in, data_in):
+        """Filter out zero entries (frozen parameters)."""
+        s_out, d_out = [], []
+        for s, v in zip(steps_in, data_in):
+            if v > 0:
+                s_out.append(s)
+                d_out.append(v)
+        return s_out, d_out
+
+    # Per-parameter subplot
     fig, axes = plt.subplots(2, 2, figsize=(13, 8), sharex=True)
     fig.suptitle("Per-parameter gradient norms (before clipping)", fontsize=13)
-
-    def _ema(data, alpha=0.05):
-        out = [data[0]]
-        for v in data[1:]:
-            out.append(alpha * v + (1 - alpha) * out[-1])
-        return out
 
     for ax, data, name, color in [
         (axes[0, 0], H_grads, "|∇H̃|", "red"),
@@ -531,20 +1785,26 @@ def _save_gradient_norm_plot(history, history2=None):
         (axes[1, 0], alpha_grads, "|∇α̃|", "green"),
         (axes[1, 1], omega_grads, "|∇ω̃|", "orange"),
     ]:
-        ax.semilogy(steps, data, color=color, alpha=0.15, linewidth=0.5)
-        if len(data) > 10:
-            ax.semilogy(steps, _ema(data), color=color, linewidth=1.5,
-                        label=f"{name} (EMA)")
+        s_nz, d_nz = _nonzero(steps, data)
+        if s_nz:
+            ax.semilogy(s_nz, d_nz, color=color, alpha=0.15, linewidth=0.5)
+            s_ema, d_ema = _ema(steps, data)
+            if len(d_ema) > 10:
+                ax.semilogy(s_ema, d_ema, color=color, linewidth=1.5,
+                            label=f"{name} (EMA)")
         ax.set_ylabel(name, fontsize=11)
         ax.set_xlabel("Iteration")
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=9)
+        if history2:
+            ax.axvline(s1_len, color="gray", linestyle="--", alpha=0.5)
 
     plt.tight_layout()
     plt.savefig("amcc_gradient_norms.png", dpi=150)
     print("Saved: amcc_gradient_norms.png")
     plt.close(fig)
 
+    # Comparison overlay
     fig, ax = plt.subplots(figsize=(10, 5))
     for data, name, color in [
         (H_grads, "|∇H̃|", "red"),
@@ -552,9 +1812,13 @@ def _save_gradient_norm_plot(history, history2=None):
         (alpha_grads, "|∇α̃|", "green"),
         (omega_grads, "|∇ω̃|", "orange"),
     ]:
-        if len(data) > 10:
-            ax.semilogy(steps, _ema(data), color=color, linewidth=1.5,
+        s_ema, d_ema = _ema(steps, data)
+        if len(d_ema) > 10:
+            ax.semilogy(s_ema, d_ema, color=color, linewidth=1.5,
                         label=name)
+    if history2:
+        ax.axvline(s1_len, color="gray", linestyle="--", alpha=0.5,
+                   label="Stage boundary")
     ax.set_xlabel("Iteration", fontsize=11)
     ax.set_ylabel("Gradient norm (EMA)", fontsize=11)
     ax.set_title("Gradient norm comparison — H vs other parameters")
@@ -565,12 +1829,18 @@ def _save_gradient_norm_plot(history, history2=None):
     print("Saved: amcc_gradient_comparison.png")
     plt.close(fig)
 
-if __name__ == "__main__":
 
+# =============================================================================
+# Main
+# =============================================================================
+
+if __name__ == "__main__":
     t_start = time.time()
     cfg = CONFIG
+    mode = cfg["mode"]
 
-    print("Loading in-sample market data...")
+    # --- Load data ---
+    print("Loading market data...")
     print(f"  Date: {cfg['in_sample_date']}")
     mkt = load_market_data(
         cfg["data_file"],
@@ -580,262 +1850,311 @@ if __name__ == "__main__":
     )
     print_market_summary(mkt)
 
-    print("\n" + "#" * 60)
-    print("# INITIALISATION")
-    print("#" * 60)
+    # =====================================================================
+    # MODE E: Roughness ablation
+    # =====================================================================
+    if mode == "roughness":
+        print("\n" + "=" * 72)
+        print("ROUGHNESS ABLATION STUDY: H < 1/2  vs  H = 1/2")
+        print("=" * 72)
 
-    params = initialise_params(mkt, H_init=0.20, eta_init=2.3)
+        rr = run_mode_roughness(mkt, cfg)
+        params_rough = rr["params_rough"]
+        params_h05 = rr["params_h05"]
 
-    print("\n" + "#" * 60)
-    print("# AMCC CALIBRATION")
-    print("#" * 60)
+        # Diagnostics — rough
+        diag_scheme = _resolve_diag_scheme(cfg)
+        diag_kappa = cfg.get("diag_hybrid_kappa", 3)
 
-    if cfg["mode"] == "hybrid":
-        hcfg = cfg["hybrid"]
-        print(f"\nMode: hybrid (BLP κ={hcfg['kappa']})")
-        print(f"  {hcfg['iterations']} iterations, {hcfg['N_paths']:,} paths, "
-              f"{hcfg['M']} steps, lr={hcfg['lr']}")
-        print(f"  H_lr_factor={hcfg.get('H_lr_factor', 1.0)}, "
-              f"grad_clip_norm={hcfg.get('grad_clip_norm', 10.0)}")
-
-        params.unfix_H()
-        result = calibrate(
-            params, mkt,
-            n_iterations=hcfg["iterations"],
-            lr=hcfg["lr"],
-            N_paths=hcfg["N_paths"],
-            M=hcfg["M"],
-            scheme="hybrid",
-            hybrid_kappa=hcfg["kappa"],
-            variance_curve_mode=hcfg["variance_mode"],
-            use_crn=True,
-            crn_seed=cfg["crn_seed"],
-            log_every=20,
-            swaption_keys=hcfg["keys"],
-            scheduler_type=hcfg.get("scheduler", "cosine"),
-            warmup_steps=hcfg.get("warmup_steps", 50),
-            early_stop_patience=hcfg.get("early_stop_patience",
-                                         cfg.get("early_stop_patience")),
-            early_stop_tol=cfg.get("early_stop_tol", 1e-4),
-            H_lr_factor=hcfg.get("H_lr_factor", 1.0),
-            grad_clip_norm=hcfg.get("grad_clip_norm", 10.0),
+        report_rough = mc_diagnostics(
+            params_rough, mkt, label="Rough (H free)",
+            N_paths=cfg["diag_N_paths"], M=cfg["diag_M"],
+            scheme=diag_scheme, hybrid_kappa=diag_kappa,
         )
 
-        if result["best_state"] is not None:
-            params.load_state_dict(result["best_state"])
+        # Diagnostics — H=0.5 (exact scheme, no singularity)
+        report_h05 = mc_diagnostics(
+            params_h05, mkt, label="Markovian (H = 0.5)",
+            N_paths=cfg["diag_N_paths"], M=cfg["diag_M"],
+            scheme="exact", hybrid_kappa=diag_kappa,
+        )
+
+        # Head-to-head comparison
+        print("\n" + "#" * 60)
+        print("# HEAD-TO-HEAD COMPARISON")
+        print("#" * 60)
+
+        comparison = compare_reports(report_rough, report_h05, mkt)
+
+        # Smile comparisons (selected swaptions)
+        print("\n" + "#" * 60)
+        print("# SMILE COMPARISONS (selected swaptions)")
+        print("#" * 60)
+
+        representative_keys = [
+            (1.0, 1), (1.0, 5), (1.0, 10),
+            (3.0, 1), (3.0, 5),
+            (5.0, 1), (5.0, 5),
+            (7.0, 1), (7.0, 3),
+            (10.0, 1),
+        ]
+        for key in representative_keys:
+            if key in mkt.swaptions:
+                print(f"\n--- {key[0]:.0f}Y x {key[1]:.0f}Y ---")
+                print("  [Rough]")
+                print_smile_comparison(
+                    params_rough, mkt.swaptions[key], mkt,
+                    variance_curve_mode="full",
+                    N_paths=cfg["diag_N_paths"], M=cfg["diag_M"],
+                    scheme=diag_scheme, hybrid_kappa=diag_kappa,
+                )
+                print("  [H=0.5]")
+                print_smile_comparison(
+                    params_h05, mkt.swaptions[key], mkt,
+                    variance_curve_mode="full",
+                    N_paths=cfg["diag_N_paths"], M=cfg["diag_M"],
+                    scheme="exact", hybrid_kappa=diag_kappa,
+                )
+
+        # Plots
+        print("\n" + "#" * 60)
+        print("# GENERATING PLOTS")
+        print("#" * 60)
+
+        save_comparison_plots(params_rough, params_h05, mkt, cfg)
+
+        # Summary
+        delta = comparison["delta_total"]
+        total_r = comparison["total_rmse_rough"]
+        total_h = comparison["total_rmse_h05"]
+        rel = delta / total_h * 100 if total_h > 0 else 0
+
+        print(f"\n  Rough:     H = {rr['H_rough']:.4f},  RMSE = {total_r:.1f} bp")
+        print(f"  Markovian: H = 0.5000,  RMSE = {total_h:.1f} bp")
+        print(f"  Roughness improvement: {delta:+.1f} bp  ({rel:+.1f}% relative)")
+        print(f"  Rough wins {comparison['rough_wins']}/"
+              f"{comparison['rough_wins'] + comparison['h05_wins']} swaptions")
+
+        if delta > 20:
+            print("\n  Verdict: Roughness contributes meaningfully (>20bp).")
+            print("  The H < 1/2 specification captures smile dynamics that")
+            print("  the Markovian special case of the FMM cannot.")
+        elif delta > 5:
+            print("\n  Verdict: Moderate roughness contribution (5-20bp).")
+            print("  Both roughness and the multi-factor correlation structure")
+            print("  contribute, but roughness alone is not transformative.")
+        else:
+            print("\n  Verdict: Roughness contribution is small (<5bp).")
+            print("  The multi-factor FMM correlation structure does the")
+            print("  heavy lifting; H < 1/2 is a refinement, not the main driver.")
+
+        # Save
+        elapsed = time.time() - t_start
+        with torch.no_grad():
+            p_h = params_h05()
+        results = {
+            "H_rough": rr["H_rough"],
+            "eta_rough": rr["eta_rough"],
+            "H_h05": 0.5,
+            "eta_h05": p_h["eta"].item(),
+            "total_rmse_rough": total_r,
+            "total_rmse_h05": total_h,
+            "delta_rmse": delta,
+            "rough_wins": comparison["rough_wins"],
+            "h05_wins": comparison["h05_wins"],
+            "per_swaption": comparison["per_swaption"],
+            "params_h05_state_dict": params_h05.state_dict(),
+            "h05_history": rr["h05_history"],
+            "elapsed_seconds": elapsed,
+        }
+        torch.save(results, "roughness_ablation_results.pt")
+        print(f"\nResults saved to roughness_ablation_results.pt")
+
+    # =====================================================================
+    # MODE F: Cross-validation
+    # =====================================================================
+    elif mode == "cross":
+        print("\n" + "#" * 60)
+        print("# INITIALISATION")
+        print("#" * 60)
+
+        params = initialise_params(mkt, H_init=0.20, eta_init=1.8)
+
+        print("\n" + "#" * 60)
+        print("# AMCC CALIBRATION (train set only)")
+        print("#" * 60)
+
+        result = run_mode_cross(params, mkt, cfg)
+        train_keys = result["train_keys"]
+        test_keys = result["test_keys"]
 
         with torch.no_grad():
             H_calibrated = params.get_H().item()
-        print(f"\nHybrid calibration complete. H = {H_calibrated:.4f}")
 
+        print_calibrated_params(params, mkt)
+
+        diag_scheme = _resolve_diag_scheme(cfg)
+        diag_kappa = cfg.get("diag_hybrid_kappa", 3)
+
+        run_cross_diagnostics(
+            params, mkt, cfg, diag_scheme, diag_kappa,
+            train_keys, test_keys)
+
+        # Plots
+        print("\n" + "#" * 60)
+        print("# GENERATING PLOTS")
+        print("#" * 60)
+
+        save_plots(
+            params, mkt,
+            history=result["stage1"]["history"],
+            config=cfg,
+            history2=result["stage2"]["history"],
+            test_keys=test_keys,
+        )
+
+        # Save
+        elapsed = time.time() - t_start
+        with torch.no_grad():
+            p = params()
+        results = {
+            "config": cfg,
+            "mode": mode,
+            "params_state_dict": params.state_dict(),
+            "H": p["H"].item(),
+            "eta": p["eta"].item(),
+            "alpha": p["alpha"].numpy(),
+            "rho0": p["rho0"].numpy(),
+            "rho": p["rho"].numpy(),
+            "Sigma": p["Sigma"].numpy(),
+            "H_calibrated": H_calibrated,
+            "train_keys": train_keys,
+            "test_keys": test_keys,
+            "stage1_history": result["stage1"]["history"],
+            "stage2_history": result["stage2"]["history"],
+            "H_grad_norms": [
+                r.get("grad_norms", {}).get("H_tilde", 0.0)
+                for r in result["stage1"]["history"]
+            ],
+            "elapsed_seconds": elapsed,
+        }
+        torch.save(results, "amcc_calibration_results.pt")
+        print(f"\nResults saved to amcc_calibration_results.pt")
+
+    # =====================================================================
+    # STANDARD CALIBRATION MODES (A, B, C, D)
+    # =====================================================================
     else:
-        print(f"\nMode: two_stage")
+        # --- Initialise ---
+        print("\n" + "#" * 60)
+        print("# INITIALISATION")
+        print("#" * 60)
 
-        result = calibrate_two_stage(
-            params, mkt,
-            stage1_iterations=cfg["stage1"]["iterations"],
-            stage1_lr=cfg["stage1"]["lr"],
-            stage1_N_paths=cfg["stage1"]["N_paths"],
-            stage1_M=cfg["stage1"]["M"],
-            stage1_keys=cfg["stage1"]["keys"],
-            stage2_iterations=cfg["stage2"]["iterations"],
-            stage2_lr=cfg["stage2"]["lr"],
-            stage2_N_paths=cfg["stage2"]["N_paths"],
-            stage2_M=cfg["stage2"]["M"],
-            stage2_variance_mode=cfg["stage2"]["variance_mode"],
-            stage2_keys=cfg["stage2"]["keys"],
-            stage2_scheduler=cfg["stage2"].get("scheduler", "cosine"),
-            stage2_warmup_steps=cfg["stage2"].get("warmup_steps", 30),
-            stage2_cosine_power=cfg["stage2"].get("cosine_power", 0.5),
-            use_crn=True,
-            crn_seed=cfg["crn_seed"],
-            log_every=20,
-            early_stop_patience=cfg.get("early_stop_patience", 150),
-            early_stop_tol=cfg.get("early_stop_tol", 1e-4),
-        )
+        params = initialise_params(mkt, H_init=0.20, eta_init=1.8)
+
+        # --- Calibrate ---
+        print("\n" + "#" * 60)
+        print("# AMCC CALIBRATION")
+        print("#" * 60)
+
+        if mode == "hybrid":
+            result = run_mode_a(params, mkt, cfg)
+        elif mode == "hybrid_two_stage":
+            result = run_mode_c(params, mkt, cfg)
+        elif mode == "two_stage":
+            print(f"\nMode: two_stage (legacy)")
+            result = run_mode_b(params, mkt, cfg)
+        elif mode == "adachi":
+            result = run_mode_d(params, mkt, cfg)
+        else:
+            raise ValueError(f"Unknown mode: {mode}")
 
         with torch.no_grad():
             H_calibrated = params.get_H().item()
 
-    print("\n" + "#" * 60)
-    print("# CALIBRATED PARAMETERS")
-    print("#" * 60)
+        # --- Report ---
+        print_calibrated_params(params, mkt)
 
-    with torch.no_grad():
-        p = params()
-        print(f"\n  H     = {p['H'].item():.4f}")
-        print(f"  η     = {p['eta'].item():.4f}")
+        diag_scheme = _resolve_diag_scheme(cfg)
+        diag_kappa = cfg.get("diag_hybrid_kappa", 3)
 
-        alpha = p["alpha"].numpy()
-        print(f"\n  Volatility levels α_j:")
-        for j in range(mkt.N):
-            print(f"    α_{j+1:2d} = {alpha[j]:.4f}")
+        report_in, representative_keys = run_in_sample_diagnostics(
+            params, mkt, cfg, diag_scheme, diag_kappa)
 
-        rho0 = p["rho0"].numpy()
-        print(f"\n  Spot-vol correlations ρ₀,j:")
-        for j in range(mkt.N):
-            print(f"    ρ₀,{j+1:2d} = {rho0[j]:+.4f}")
+        # --- Plots ---
+        print("\n" + "#" * 60)
+        print("# GENERATING PLOTS")
+        print("#" * 60)
 
-        print(f"\n  Forward-rate correlation matrix ρ_ij:")
-        rho = p["rho"].numpy()
-        np.set_printoptions(precision=3, linewidth=120)
-        print(rho)
-
-    print("\n" + "#" * 60)
-    print(f"# IN-SAMPLE MC DIAGNOSTICS ({cfg['in_sample_date']})")
-    print("#" * 60)
-
-    report_in = mc_diagnostics(
-        params, mkt,
-        N_paths=cfg["diag_N_paths"],
-        M=cfg["diag_M"],
-        scheme=cfg.get("diag_scheme", "exact"),
-        hybrid_kappa=cfg.get("diag_hybrid_kappa", 2),
-    )
-    print_accuracy_summary(report_in, mkt, label=f"IN-SAMPLE ({cfg['in_sample_date']})")
-
-    print("\n" + "#" * 60)
-    print("# SMILE COMPARISONS — in-sample (selected swaptions)")
-    print("#" * 60)
-
-    representative_keys = [
-        (1.0, 1), (1.0, 5), (1.0, 10),
-        (3.0, 1), (3.0, 5),
-        (5.0, 1), (5.0, 5),
-        (7.0, 1), (7.0, 3),
-        (10.0, 1),
-    ]
-    diag_scheme = cfg.get("diag_scheme", "exact")
-    diag_kappa = cfg.get("diag_hybrid_kappa", 2)
-    for key in representative_keys:
-        if key in mkt.swaptions:
-            print_smile_comparison(
-                params, mkt.swaptions[key], mkt,
-                variance_curve_mode="full",
-                N_paths=cfg["diag_N_paths"],
-                M=cfg["diag_M"],
-                scheme=diag_scheme,
-                hybrid_kappa=diag_kappa,
-            )
-
-    print("\n" + "#" * 60)
-    print("# GENERATING PLOTS")
-    print("#" * 60)
-
-    save_plots(
-        params, mkt,
-        history=result["history"] if cfg["mode"] == "hybrid"
-                else result["stage1"]["history"],
-        config=cfg,
-        history2=None if cfg["mode"] == "hybrid"
-                 else result["stage2"]["history"],
-    )
-
-    print("\n" + "=" * 72)
-    print("  OUT-OF-SAMPLE EVALUATION")
-    print(f"  Calibrated on: {cfg['in_sample_date']}")
-    print(f"  Evaluating on: {cfg['out_sample_date']}")
-    print("=" * 72)
-
-    mkt_oos = load_market_data(
-        cfg["data_file"],
-        subset=cfg["subset"],
-        date=cfg["out_sample_date"],
-        device=cfg["device"],
-    )
-    print_market_summary(mkt_oos)
-
-    print("\n--- Re-matching α to out-of-sample ATM levels (MC-based) ---")
-    params_oos = copy.deepcopy(params)
-    with torch.no_grad():
-        p_oos = params_oos()
-        smile_keys_oos = sorted([k for k in mkt_oos.swaptions.keys() if k[1] == 1])
-        alpha_oos = match_all_alphas(
-            mkt_oos, p_oos["H"], p_oos["eta"], p_oos["rho0"], p_oos["rho"],
-            alpha_init=p_oos["alpha"],
-            smile_keys=smile_keys_oos,
-            variance_curve_mode="full",
-            method="mc",
-            N_paths=cfg["diag_N_paths"],
-            M=cfg["diag_M"],
-            seed=cfg["crn_seed"],
+        is_single_stage = (mode == "hybrid")
+        save_plots(
+            params, mkt,
+            history=result["history"] if is_single_stage
+                    else result["stage1"]["history"],
+            config=cfg,
+            history2=None if is_single_stage
+                     else result["stage2"]["history"],
         )
 
-        matched_indices_oos = []
-        for key in smile_keys_oos:
-            swn = mkt_oos.swaptions[key]
-            if swn.J - swn.I == 1:
-                matched_indices_oos.append(swn.I)
+        # --- Out-of-sample ---
+        mkt_oos = load_market_data(
+            cfg["data_file"],
+            subset=cfg["subset"],
+            date=cfg["out_sample_date"],
+            device=cfg["device"],
+        )
+        params_oos = run_oos_evaluation(
+            params, mkt_oos, cfg, diag_scheme, diag_kappa,
+            representative_keys)
 
-        if matched_indices_oos:
-            alpha_oos = _interpolate_alpha(alpha_oos, matched_indices_oos)
+        print("\n" + "#" * 60)
+        print("# GENERATING OOS PLOTS")
+        print("#" * 60)
 
-        for j in range(mkt_oos.N):
-            a = alpha_oos[j].item()
-            params_oos.alpha_tilde.data[j] = _softplus_inv(a)
+        save_smile_plots(
+            params_oos, mkt_oos, cfg,
+            filename="amcc_smile_fits_oos.png",
+            suptitle=f"Out-of-sample smile fits ({cfg['out_sample_date']})",
+        )
 
-    print(f"\n--- Out-of-sample MC report ({cfg['out_sample_date']}) ---")
-    report_oos = mc_diagnostics(
-        params_oos, mkt_oos,
-        N_paths=cfg["diag_N_paths"],
-        M=cfg["diag_M"],
-        scheme=cfg.get("diag_scheme", "exact"),
-        hybrid_kappa=cfg.get("diag_hybrid_kappa", 2),
-    )
-    print_accuracy_summary(report_oos, mkt_oos, label=f"OUT-OF-SAMPLE ({cfg['out_sample_date']})")
+        # --- Save results ---
+        elapsed = time.time() - t_start
+        with torch.no_grad():
+            p = params()
 
-    print("\n" + "#" * 60)
-    print("# SMILE COMPARISONS — out-of-sample")
-    print("#" * 60)
+        results = {
+            "config": cfg,
+            "mode": mode,
+            "params_state_dict": params.state_dict(),
+            "H": p["H"].item(),
+            "eta": p["eta"].item(),
+            "alpha": p["alpha"].numpy(),
+            "rho0": p["rho0"].numpy(),
+            "rho": p["rho"].numpy(),
+            "Sigma": p["Sigma"].numpy(),
+            "H_calibrated": H_calibrated,
+            "in_sample_date": cfg["in_sample_date"],
+            "out_sample_date": cfg["out_sample_date"],
+            "elapsed_seconds": elapsed,
+        }
+        if mode == "hybrid":
+            results["history"] = result["history"]
+            results["H_grad_norms"] = [
+                r.get("grad_norms", {}).get("H_tilde", 0.0)
+                for r in result["history"]
+            ]
+        else:
+            results["stage1_history"] = result["stage1"]["history"]
+            results["stage2_history"] = result["stage2"]["history"]
+            if mode in ("hybrid_two_stage", "adachi"):
+                results["H_grad_norms"] = [
+                    r.get("grad_norms", {}).get("H_tilde", 0.0)
+                    for r in result["stage1"]["history"]
+                ]
 
-    for key in representative_keys:
-        if key in mkt_oos.swaptions:
-            print_smile_comparison(
-                params_oos, mkt_oos.swaptions[key], mkt_oos,
-                variance_curve_mode="full",
-                N_paths=cfg["diag_N_paths"],
-                M=cfg["diag_M"],
-                scheme=diag_scheme,
-                hybrid_kappa=diag_kappa,
-            )
-
-    print("\n" + "#" * 60)
-    print("# GENERATING OOS PLOTS")
-    print("#" * 60)
-
-    save_smile_plots(
-        params_oos, mkt_oos, cfg,
-        filename="amcc_smile_fits_oos.png",
-        suptitle=f"Out-of-sample smile fits ({cfg['out_sample_date']})",
-    )
+        torch.save(results, "amcc_calibration_results.pt")
+        print(f"\nResults saved to amcc_calibration_results.pt")
 
     elapsed = time.time() - t_start
-
-    results = {
-        "config": cfg,
-        "mode": cfg["mode"],
-        "params_state_dict": params.state_dict(),
-        "H": p["H"].item(),
-        "eta": p["eta"].item(),
-        "alpha": p["alpha"].numpy(),
-        "rho0": p["rho0"].numpy(),
-        "rho": p["rho"].numpy(),
-        "Sigma": p["Sigma"].numpy(),
-        "H_calibrated": H_calibrated,
-        "in_sample_date": cfg["in_sample_date"],
-        "out_sample_date": cfg["out_sample_date"],
-        "elapsed_seconds": elapsed,
-    }
-    if cfg["mode"] == "hybrid":
-        results["history"] = result["history"]
-        results["H_grad_norms"] = [
-            r.get("grad_norms", {}).get("H_tilde", 0.0)
-            for r in result["history"]
-        ]
-    else:
-        results["stage1_history"] = result["stage1"]["history"]
-        results["stage2_history"] = result["stage2"]["history"]
-    torch.save(results, "amcc_calibration_results.pt")
-    print(f"\nResults saved to amcc_calibration_results.pt")
     print(f"Total elapsed time: {elapsed:.1f}s ({elapsed/60:.1f} min)")
     print("\nDone.")
