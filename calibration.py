@@ -40,6 +40,7 @@ CONFIG = {
     #   "hybrid"            — Mode A: single-stage BLP, H differentiable
     #   "hybrid_two_stage"  — Mode C: two-stage BLP both stages, H frozen in S2
     #   "two_stage"         — Mode B: legacy, approx S1 → exact Cholesky S2
+    #   "hybrid_exact"      — Mode G: hybrid S1 → exact Cholesky S2
     #   "adachi"            — Mode D: Adachi-style, 1Y smiles → ρ_{ij} from ATM
     #   "roughness"         — Mode E: ablation study, H free vs H = 0.5
     #   "cross"             — Mode F: train/test split cross-validation
@@ -90,6 +91,35 @@ CONFIG = {
             "warmup_steps": 30,
             "cosine_power": 0.5,
             "grad_clip_norm": 1.0,
+        },
+    },
+
+    # --- Mode G: Hybrid → Exact two-stage ---
+    "hybrid_exact": {
+        "stage1": {
+            "iterations": 400,
+            "lr": 5e-3,
+            "N_paths": 20_000,
+            "M": 50,
+            "kappa": 3,
+            "variance_mode": "simplified",
+            "keys": None,
+            "scheduler": "cosine",
+            "warmup_steps": 30,
+            "cosine_power": 0.5,
+            "H_lr_factor": 0.5,
+            "grad_clip_norm": 1.0,
+        },
+        "stage2": {
+            "iterations": 600,
+            "lr": 1e-3,
+            "N_paths": 30_000,
+            "M": 100,
+            "variance_mode": "full",
+            "keys": None,
+            "scheduler": "cosine",
+            "warmup_steps": 30,
+            "cosine_power": 0.5,
         },
     },
 
@@ -147,10 +177,11 @@ CONFIG = {
         },
     },
 
-    # --- Mode E: Roughness ablation (H free vs H = 0.5) ---
+    # --- Mode E: Roughness ablation (H sweep from 0.05 to 0.50) ---
     "roughness": {
         "rough_results_file": "amcc_calibration_results.pt",
-        "h05": {
+        "H_values": [round(0.05 * i, 2) for i in range(1, 11)],
+        "fixed_H": {
             "eta_init": 1.5,
             "iterations": 1200,
             "lr": 5e-3,
@@ -293,6 +324,7 @@ def _resolve_diag_scheme(cfg):
     if raw == "auto":
         scheme = "hybrid" if cfg["mode"] in (
             "hybrid", "hybrid_two_stage", "adachi", "cross") else "exact"
+        # hybrid_exact uses exact Cholesky in stage 2, so diag should be exact
         print(f"  diag_scheme=auto → resolved to '{scheme}' "
               f"(matches calibration mode)")
         return scheme
@@ -384,10 +416,10 @@ def initialise_params(mkt, H_init=0.20, eta_init=2.3):
     return params
 
 
-def initialise_h05(mkt, eta_init=1.5):
-    """Create parameter module with H fixed at 0.5 (Markovian SABR)."""
+def initialise_fixed_H(mkt, H_val, eta_init=1.5):
+    """Create parameter module with H fixed at a given value."""
     params = MappedRoughSABRParams(N=mkt.N, device=mkt.device)
-    params.set_H(0.5)
+    params.set_H(H_val)
     params.fix_H()
     params.set_eta(eta_init)
 
@@ -417,12 +449,17 @@ def initialise_h05(mkt, eta_init=1.5):
 
     with torch.no_grad():
         p = params()
-        print(f"\n  H=0.5 initialisation:")
+        print(f"\n  H={H_val:.2f} initialisation:")
         print(f"    H     = {p['H'].item():.4f}  [FIXED]")
-        print(f"    η     = {p['eta'].item():.4f}  (= κ when H=0.5)")
+        print(f"    η     = {p['eta'].item():.4f}")
         print(f"    α     = [{', '.join(f'{a:.4f}' for a in p['alpha'].numpy())}]")
 
     return params
+
+
+def initialise_h05(mkt, eta_init=1.5):
+    """Create parameter module with H fixed at 0.5 (Markovian SABR)."""
+    return initialise_fixed_H(mkt, 0.5, eta_init=eta_init)
 
 
 # =============================================================================
@@ -513,6 +550,72 @@ def run_mode_c(params, mkt, cfg):
     stage2_result = _run_hybrid_stage(
         params, mkt, cfg, h2cfg["stage2"],
         freeze_H=True, crn_offset=10000, label="STAGE 2")
+
+    _rematch_alpha(params, mkt, cfg,
+                   label="Post-calibration α re-matching (MC-based Brent)")
+
+    return {
+        "stage1": stage1_result,
+        "stage2": stage2_result,
+    }
+
+
+def run_mode_g(params, mkt, cfg):
+    """Mode G: Hybrid → Exact two-stage calibration.
+
+    Stage 1: Hybrid BLP scheme with H differentiable (same as Mode C stage 1).
+    Stage 2: Exact Cholesky scheme with H frozen (same as Mode B stage 2).
+    """
+    gecfg = cfg["hybrid_exact"]
+
+    # --- Stage 1: Hybrid BLP ---
+    stage1_result = _run_hybrid_stage(
+        params, mkt, cfg, gecfg["stage1"],
+        freeze_H=False, crn_offset=0, label="STAGE 1 (hybrid)")
+
+    _rematch_alpha(params, mkt, cfg, N_paths=50_000, M=gecfg["stage2"]["M"],
+                   label="Inter-stage α re-matching (MC-based Brent)")
+
+    # --- Stage 2: Exact Cholesky ---
+    s2cfg = gecfg["stage2"]
+    with torch.no_grad():
+        H_val = params.get_H().item()
+    print(f"\n{'=' * 60}")
+    print(f"STAGE 2 (exact): Exact Cholesky scheme "
+          f"(H fixed at {H_val:.4f})")
+    print("=" * 60)
+    print(f"  {s2cfg['iterations']} iterations, {s2cfg['N_paths']:,} paths, "
+          f"{s2cfg['M']} steps, lr={s2cfg['lr']}")
+
+    params.fix_H()
+
+    stage2_result = calibrate(
+        params, mkt,
+        n_iterations=s2cfg["iterations"],
+        lr=s2cfg["lr"],
+        N_paths=s2cfg["N_paths"],
+        M=s2cfg["M"],
+        use_exact=True,
+        variance_curve_mode=s2cfg["variance_mode"],
+        use_crn=True,
+        crn_seed=cfg["crn_seed"] + 10000,
+        log_every=20,
+        swaption_keys=s2cfg["keys"],
+        scheduler_type=s2cfg.get("scheduler", "cosine"),
+        warmup_steps=s2cfg.get("warmup_steps", 30),
+        cosine_power=s2cfg.get("cosine_power", 0.5),
+        early_stop_patience=cfg.get("early_stop_patience", 150),
+        early_stop_tol=cfg.get("early_stop_tol", 1e-4),
+    )
+
+    if stage2_result["best_state"] is not None:
+        params.load_state_dict(stage2_result["best_state"])
+
+    with torch.no_grad():
+        eta_val = params.get_eta().item()
+        kappa_val = eta_val * np.sqrt(2.0 * H_val)
+    print(f"\nStage 2 complete. H = {H_val:.4f}, "
+          f"η = {eta_val:.4f}, κ = {kappa_val:.4f}")
 
     _rematch_alpha(params, mkt, cfg,
                    label="Post-calibration α re-matching (MC-based Brent)")
@@ -704,14 +807,15 @@ def run_mode_d(params, mkt, cfg):
 
 
 def run_mode_roughness(mkt, cfg):
-    """Mode E: Roughness ablation — compare calibrated rough model to H=0.5.
+    """Mode E: Roughness ablation — sweep fixed H values and compare.
 
-    Loads existing rough calibration from file, calibrates a fresh H=0.5
-    model, then runs diagnostics on both for head-to-head comparison.
-    Returns both parameter sets and the H=0.5 calibration result.
+    Loads existing rough calibration (H free) from file, then calibrates
+    a model for each fixed H value in the configured sweep (default
+    0.05, 0.10, ..., 0.50). Returns all parameter sets and histories.
     """
     rcfg = cfg["roughness"]
-    h05cfg = rcfg["h05"]
+    hcfg = rcfg["fixed_H"]
+    H_values = rcfg["H_values"]
 
     # --- Load rough parameters ---
     rough_file = rcfg["rough_results_file"]
@@ -738,52 +842,61 @@ def run_mode_roughness(mkt, cfg):
     print(f"  κ     = {kappa_rough:.4f}")
     print(f"  α     = [{', '.join(f'{a:.4f}' for a in p_r['alpha'].numpy())}]")
 
-    # --- Calibrate H=0.5 model ---
-    print("\n" + "#" * 60)
-    print("# MARKOVIAN SPECIAL CASE (H = 0.5)")
-    print("#" * 60)
+    # --- Calibrate fixed-H models ---
+    fixed_models = {}
+    for H_val in H_values:
+        print("\n" + "#" * 60)
+        print(f"# FIXED H = {H_val:.2f}")
+        print("#" * 60)
 
-    params_h05 = initialise_h05(mkt, eta_init=h05cfg["eta_init"])
+        params_h = initialise_fixed_H(mkt, H_val, eta_init=hcfg["eta_init"])
 
-    print(f"\n  Calibrating with H = 0.5 fixed...")
-    print(f"  {h05cfg['iterations']} iterations, {h05cfg['N_paths']:,} paths, "
-          f"{h05cfg['M']} steps, lr={h05cfg['lr']}")
+        print(f"\n  Calibrating with H = {H_val:.2f} fixed...")
+        print(f"  {hcfg['iterations']} iterations, {hcfg['N_paths']:,} paths, "
+              f"{hcfg['M']} steps, lr={hcfg['lr']}")
 
-    result_h05 = calibrate(
-        params_h05, mkt,
-        n_iterations=h05cfg["iterations"],
-        lr=h05cfg["lr"],
-        N_paths=h05cfg["N_paths"],
-        M=h05cfg["M"],
-        use_exact=True,
-        variance_curve_mode=h05cfg["variance_mode"],
-        use_crn=True,
-        crn_seed=cfg["crn_seed"],
-        log_every=20,
-        swaption_keys=None,
-        scheduler_type=h05cfg.get("scheduler", "cosine"),
-        warmup_steps=h05cfg.get("warmup_steps", 50),
-        cosine_power=h05cfg.get("cosine_power", 0.5),
-        early_stop_patience=h05cfg.get("early_stop_patience", 200),
-        early_stop_tol=1e-4,
-    )
+        result_h = calibrate(
+            params_h, mkt,
+            n_iterations=hcfg["iterations"],
+            lr=hcfg["lr"],
+            N_paths=hcfg["N_paths"],
+            M=hcfg["M"],
+            use_exact=True,
+            variance_curve_mode=hcfg["variance_mode"],
+            use_crn=True,
+            crn_seed=cfg["crn_seed"],
+            log_every=20,
+            swaption_keys=None,
+            scheduler_type=hcfg.get("scheduler", "cosine"),
+            warmup_steps=hcfg.get("warmup_steps", 50),
+            cosine_power=hcfg.get("cosine_power", 0.5),
+            early_stop_patience=hcfg.get("early_stop_patience", 200),
+            early_stop_tol=1e-4,
+        )
 
-    if result_h05["best_state"] is not None:
-        params_h05.load_state_dict(result_h05["best_state"])
+        if result_h["best_state"] is not None:
+            params_h.load_state_dict(result_h["best_state"])
 
-    with torch.no_grad():
-        p_h = params_h05()
-        print(f"\n  H=0.5 calibration complete.")
-        print(f"    η     = {p_h['eta'].item():.4f}  (= κ)")
-        print(f"    α     = [{', '.join(f'{a:.4f}' for a in p_h['alpha'].numpy())}]")
-        print(f"    ρ₀    = [{', '.join(f'{r:.3f}' for r in p_h['rho0'].numpy())}]")
+        with torch.no_grad():
+            p_h = params_h()
+            eta_h = p_h["eta"].item()
+            kappa_h = eta_h * np.sqrt(2.0 * H_val)
+            print(f"\n  H={H_val:.2f} calibration complete.")
+            print(f"    η     = {eta_h:.4f},  κ = {kappa_h:.4f}")
+            print(f"    α     = [{', '.join(f'{a:.4f}' for a in p_h['alpha'].numpy())}]")
+            print(f"    ρ₀    = [{', '.join(f'{r:.3f}' for r in p_h['rho0'].numpy())}]")
+
+        fixed_models[H_val] = {
+            "params": params_h,
+            "history": result_h["history"],
+            "eta": eta_h,
+        }
 
     return {
         "params_rough": params_rough,
-        "params_h05": params_h05,
         "H_rough": H_rough,
         "eta_rough": eta_rough,
-        "h05_history": result_h05["history"],
+        "fixed_models": fixed_models,
     }
 
 
@@ -1856,13 +1969,15 @@ if __name__ == "__main__":
     # MODE E: Roughness ablation
     # =====================================================================
     if mode == "roughness":
+        H_values = cfg["roughness"]["H_values"]
         print("\n" + "=" * 72)
-        print("ROUGHNESS ABLATION STUDY: H < 1/2  vs  H = 1/2")
+        print(f"ROUGHNESS ABLATION STUDY: H free vs fixed H ∈ "
+              f"{{{', '.join(f'{h:.2f}' for h in H_values)}}}")
         print("=" * 72)
 
         rr = run_mode_roughness(mkt, cfg)
         params_rough = rr["params_rough"]
-        params_h05 = rr["params_h05"]
+        fixed_models = rr["fixed_models"]
 
         # Diagnostics — rough
         diag_scheme = _resolve_diag_scheme(cfg)
@@ -1874,19 +1989,66 @@ if __name__ == "__main__":
             scheme=diag_scheme, hybrid_kappa=diag_kappa,
         )
 
-        # Diagnostics — H=0.5 (exact scheme, no singularity)
-        report_h05 = mc_diagnostics(
-            params_h05, mkt, label="Markovian (H = 0.5)",
-            N_paths=cfg["diag_N_paths"], M=cfg["diag_M"],
-            scheme="exact", hybrid_kappa=diag_kappa,
-        )
+        # Diagnostics — each fixed H
+        reports_fixed = {}
+        for H_val in H_values:
+            reports_fixed[H_val] = mc_diagnostics(
+                fixed_models[H_val]["params"], mkt,
+                label=f"Fixed H = {H_val:.2f}",
+                N_paths=cfg["diag_N_paths"], M=cfg["diag_M"],
+                scheme="exact", hybrid_kappa=diag_kappa,
+            )
 
-        # Head-to-head comparison
+        # Head-to-head comparison vs H=0.5
+        params_h05 = fixed_models[0.5]["params"]
+        report_h05 = reports_fixed[0.5]
+
         print("\n" + "#" * 60)
-        print("# HEAD-TO-HEAD COMPARISON")
+        print("# HEAD-TO-HEAD COMPARISON (Rough vs H=0.5)")
         print("#" * 60)
 
         comparison = compare_reports(report_rough, report_h05, mkt)
+
+        # RMSE summary table across all H values
+        print("\n" + "#" * 60)
+        print("# RMSE ACROSS ALL FIXED H VALUES")
+        print("#" * 60)
+
+        per_rough = report_rough.get("per_swaption", {})
+        all_keys = sorted(per_rough.keys())
+        rough_sq_all = []
+        for key in all_keys:
+            res = per_rough[key]
+            valid = ~torch.isnan(res["iv_errors"])
+            if valid.sum() > 0:
+                rough_sq_all.extend(
+                    (res["iv_errors"][valid] * 10000).numpy() ** 2)
+        total_rmse_rough = np.sqrt(np.mean(rough_sq_all)) if rough_sq_all else 0.0
+
+        print(f"\n  {'H':>6s}  {'RMSE (bp)':>10s}  {'vs Rough':>10s}")
+        print("  " + "-" * 32)
+        print(f"  {'free':>6s}  {total_rmse_rough:10.1f}  {'---':>10s}")
+
+        rmse_by_H = {}
+        for H_val in H_values:
+            per_h = reports_fixed[H_val].get("per_swaption", {})
+            h_sq_all = []
+            for key in all_keys:
+                if key not in per_h:
+                    continue
+                res = per_h[key]
+                valid = ~torch.isnan(res["iv_errors"])
+                if valid.sum() > 0:
+                    h_sq_all.extend(
+                        (res["iv_errors"][valid] * 10000).numpy() ** 2)
+            total_h = np.sqrt(np.mean(h_sq_all)) if h_sq_all else 0.0
+            rmse_by_H[H_val] = total_h
+            delta = total_h - total_rmse_rough
+            print(f"  {H_val:6.2f}  {total_h:10.1f}  {delta:+10.1f}")
+
+        best_H = min(rmse_by_H, key=rmse_by_H.get)
+        print(f"\n  Best fixed H: {best_H:.2f} "
+              f"(RMSE = {rmse_by_H[best_H]:.1f} bp)")
 
         # Smile comparisons (selected swaptions)
         print("\n" + "#" * 60)
@@ -1910,15 +2072,16 @@ if __name__ == "__main__":
                     N_paths=cfg["diag_N_paths"], M=cfg["diag_M"],
                     scheme=diag_scheme, hybrid_kappa=diag_kappa,
                 )
-                print("  [H=0.5]")
+                print(f"  [Best fixed H={best_H:.2f}]")
                 print_smile_comparison(
-                    params_h05, mkt.swaptions[key], mkt,
+                    fixed_models[best_H]["params"],
+                    mkt.swaptions[key], mkt,
                     variance_curve_mode="full",
                     N_paths=cfg["diag_N_paths"], M=cfg["diag_M"],
                     scheme="exact", hybrid_kappa=diag_kappa,
                 )
 
-        # Plots
+        # Plots (rough vs H=0.5 for backwards compatibility)
         print("\n" + "#" * 60)
         print("# GENERATING PLOTS")
         print("#" * 60)
@@ -1926,47 +2089,42 @@ if __name__ == "__main__":
         save_comparison_plots(params_rough, params_h05, mkt, cfg)
 
         # Summary
-        delta = comparison["delta_total"]
-        total_r = comparison["total_rmse_rough"]
-        total_h = comparison["total_rmse_h05"]
-        rel = delta / total_h * 100 if total_h > 0 else 0
+        total_h05 = rmse_by_H.get(0.5, 0.0)
+        delta_h05 = total_h05 - total_rmse_rough
+        rel = delta_h05 / total_h05 * 100 if total_h05 > 0 else 0
 
-        print(f"\n  Rough:     H = {rr['H_rough']:.4f},  RMSE = {total_r:.1f} bp")
-        print(f"  Markovian: H = 0.5000,  RMSE = {total_h:.1f} bp")
-        print(f"  Roughness improvement: {delta:+.1f} bp  ({rel:+.1f}% relative)")
-        print(f"  Rough wins {comparison['rough_wins']}/"
-              f"{comparison['rough_wins'] + comparison['h05_wins']} swaptions")
-
-        if delta > 20:
-            print("\n  Verdict: Roughness contributes meaningfully (>20bp).")
-            print("  The H < 1/2 specification captures smile dynamics that")
-            print("  the Markovian special case of the FMM cannot.")
-        elif delta > 5:
-            print("\n  Verdict: Moderate roughness contribution (5-20bp).")
-            print("  Both roughness and the multi-factor correlation structure")
-            print("  contribute, but roughness alone is not transformative.")
-        else:
-            print("\n  Verdict: Roughness contribution is small (<5bp).")
-            print("  The multi-factor FMM correlation structure does the")
-            print("  heavy lifting; H < 1/2 is a refinement, not the main driver.")
+        print(f"\n  Rough (H free): H = {rr['H_rough']:.4f},  "
+              f"RMSE = {total_rmse_rough:.1f} bp")
+        print(f"  Best fixed:     H = {best_H:.2f},  "
+              f"RMSE = {rmse_by_H[best_H]:.1f} bp")
+        print(f"  Markovian:      H = 0.50,  "
+              f"RMSE = {total_h05:.1f} bp")
+        print(f"  Rough vs H=0.5 improvement: "
+              f"{delta_h05:+.1f} bp  ({rel:+.1f}% relative)")
 
         # Save
         elapsed = time.time() - t_start
-        with torch.no_grad():
-            p_h = params_h05()
+        fixed_results = {}
+        for H_val in H_values:
+            m = fixed_models[H_val]
+            with torch.no_grad():
+                p_h = m["params"]()
+            fixed_results[H_val] = {
+                "H": H_val,
+                "eta": m["eta"],
+                "rmse": rmse_by_H[H_val],
+                "params_state_dict": m["params"].state_dict(),
+                "history": m["history"],
+            }
         results = {
             "H_rough": rr["H_rough"],
             "eta_rough": rr["eta_rough"],
-            "H_h05": 0.5,
-            "eta_h05": p_h["eta"].item(),
-            "total_rmse_rough": total_r,
-            "total_rmse_h05": total_h,
-            "delta_rmse": delta,
-            "rough_wins": comparison["rough_wins"],
-            "h05_wins": comparison["h05_wins"],
-            "per_swaption": comparison["per_swaption"],
-            "params_h05_state_dict": params_h05.state_dict(),
-            "h05_history": rr["h05_history"],
+            "total_rmse_rough": total_rmse_rough,
+            "H_values": H_values,
+            "fixed_results": fixed_results,
+            "rmse_by_H": rmse_by_H,
+            "best_H": best_H,
+            "comparison_rough_vs_h05": comparison,
             "elapsed_seconds": elapsed,
         }
         torch.save(results, "roughness_ablation_results.pt")
@@ -2063,6 +2221,8 @@ if __name__ == "__main__":
             result = run_mode_a(params, mkt, cfg)
         elif mode == "hybrid_two_stage":
             result = run_mode_c(params, mkt, cfg)
+        elif mode == "hybrid_exact":
+            result = run_mode_g(params, mkt, cfg)
         elif mode == "two_stage":
             print(f"\nMode: two_stage (legacy)")
             result = run_mode_b(params, mkt, cfg)
@@ -2148,7 +2308,7 @@ if __name__ == "__main__":
         else:
             results["stage1_history"] = result["stage1"]["history"]
             results["stage2_history"] = result["stage2"]["history"]
-            if mode in ("hybrid_two_stage", "adachi"):
+            if mode in ("hybrid_two_stage", "hybrid_exact", "adachi"):
                 results["H_grad_norms"] = [
                     r.get("grad_norms", {}).get("H_tilde", 0.0)
                     for r in result["stage1"]["history"]
