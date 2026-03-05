@@ -37,118 +37,17 @@ CONFIG = {
     "device": "cpu",
 
     # --- Calibration mode ---
-    #   "hybrid"            — Mode A: single-stage BLP, H differentiable
-    #   "hybrid_two_stage"  — Mode C: two-stage BLP both stages, H frozen in S2
-    #   "two_stage"         — Mode B: legacy, approx S1 → exact Cholesky S2
-    #   "hybrid_exact"      — Mode G: hybrid S1 → exact Cholesky S2
-    #   "adachi"            — Mode D: Adachi-style, 1Y smiles → ρ_{ij} from ATM
-    #   "roughness"         — Mode E: ablation study, H free vs H = 0.5
-    #   "cross"             — Mode F: train/test split cross-validation
+    #   "adachi"            — Adachi-style, 1Y smiles → ρ_{ij} from ATM
+    #   "cross"             — train/test split cross-validation
+    #   "hybrid"            — single-stage BLP, H differentiable
+    #   "hybrid_exact"      — hybrid S1 → exact Cholesky S2
+    #   "hybrid_two_stage"  — two-stage BLP both stages, H frozen in S2
+    #   "roughness"         — ablation study, H free vs H = 0.5
+    #   "two_stage"         — legacy, approx S1 → exact Cholesky S2
     "mode": "hybrid_two_stage",
 
-    # --- Mode A: Single-stage hybrid ---
-    "hybrid": {
-        "iterations": 800,
-        "lr": 3e-3,
-        "N_paths": 30_000,
-        "M": 100,
-        "kappa": 3,
-        "variance_mode": "full",
-        "keys": None,
-        "scheduler": "cosine",
-        "warmup_steps": 50,
-        "cosine_power": 0.5,
-        "early_stop_patience": 200,
-        "H_lr_factor": 0.5,
-        "grad_clip_norm": 1.0,
-    },
-
-    # --- Mode C: Hybrid two-stage ---
-    "hybrid_two_stage": {
-        "stage1": {
-            "iterations": 400,
-            "lr": 5e-3,
-            "N_paths": 20_000,
-            "M": 50,
-            "kappa": 3,
-            "variance_mode": "simplified",
-            "keys": None,
-            "scheduler": "cosine",
-            "warmup_steps": 30,
-            "cosine_power": 0.5,
-            "H_lr_factor": 0.5,
-            "grad_clip_norm": 1.0,
-        },
-        "stage2": {
-            "iterations": 600,
-            "lr": 1e-3,
-            "N_paths": 30_000,
-            "M": 100,
-            "kappa": 3,
-            "variance_mode": "full",
-            "keys": None,
-            "scheduler": "cosine",
-            "warmup_steps": 30,
-            "cosine_power": 0.5,
-            "grad_clip_norm": 1.0,
-        },
-    },
-
-    # --- Mode G: Hybrid → Exact two-stage ---
-    "hybrid_exact": {
-        "stage1": {
-            "iterations": 400,
-            "lr": 5e-3,
-            "N_paths": 20_000,
-            "M": 50,
-            "kappa": 3,
-            "variance_mode": "simplified",
-            "keys": None,
-            "scheduler": "cosine",
-            "warmup_steps": 30,
-            "cosine_power": 0.5,
-            "H_lr_factor": 0.5,
-            "grad_clip_norm": 1.0,
-        },
-        "stage2": {
-            "iterations": 600,
-            "lr": 1e-3,
-            "N_paths": 30_000,
-            "M": 100,
-            "variance_mode": "full",
-            "keys": None,
-            "scheduler": "cosine",
-            "warmup_steps": 30,
-            "cosine_power": 0.5,
-        },
-    },
-
-    # --- Mode B: Legacy two-stage ---
-    "two_stage": {
-        "stage1": {
-            "iterations": 800,
-            "lr": 5e-3,
-            "N_paths": 10_000,
-            "M": 50,
-            "keys": None,
-        },
-        "stage2": {
-            "iterations": 800,
-            "lr": 5e-3,
-            "N_paths": 30_000,
-            "M": 50,
-            "variance_mode": "full",
-            "keys": None,
-            "scheduler": "cosine",
-            "warmup_steps": 30,
-            "cosine_power": 0.5,
-        },
-    },
-
-    # --- Mode D: Adachi-style separated calibration ---
     "adachi": {
         "stage1": {
-            # 1Y-tenor smiles: H, η, α, ρ₀ free; ρ frozen
             "iterations": 600,
             "lr": 3e-3,
             "N_paths": 30_000,
@@ -162,7 +61,6 @@ CONFIG = {
             "grad_clip_norm": 1.0,
         },
         "stage2": {
-            # Co-terminal ATM: only ω (ρ_{ij}) free; H, η, α, ρ₀ frozen
             "iterations": 400,
             "lr": 1e-3,
             "N_paths": 30_000,
@@ -176,25 +74,6 @@ CONFIG = {
         },
     },
 
-    # --- Mode E: Roughness ablation (H sweep from 0.05 to 0.50) ---
-    "roughness": {
-        "rough_results_file": "amcc_calibration_results.pt",
-        "H_values": [round(0.05 * i, 2) for i in range(1, 11)],
-        "fixed_H": {
-            "eta_init": 1.5,
-            "iterations": 1200,
-            "lr": 5e-3,
-            "N_paths": 30_000,
-            "M": 50,
-            "variance_mode": "full",
-            "scheduler": "cosine",
-            "warmup_steps": 50,
-            "cosine_power": 0.5,
-            "early_stop_patience": 200,
-        },
-    },
-
-    # --- Mode F: Cross-validation (train/test split) ---
     "cross": {
         "test_keys": [
             (1.0, 3), (1.0, 7),
@@ -228,6 +107,118 @@ CONFIG = {
             "warmup_steps": 30,
             "cosine_power": 0.5,
             "grad_clip_norm": 1.0,
+        },
+    },
+
+    "hybrid": {
+        "iterations": 800,
+        "lr": 3e-3,
+        "N_paths": 30_000,
+        "M": 100,
+        "kappa": 3,
+        "variance_mode": "full",
+        "keys": None,
+        "scheduler": "cosine",
+        "warmup_steps": 50,
+        "cosine_power": 0.5,
+        "early_stop_patience": 200,
+        "H_lr_factor": 0.5,
+        "grad_clip_norm": 1.0,
+    },
+
+    "hybrid_exact": {
+        "stage1": {
+            "iterations": 400,
+            "lr": 5e-3,
+            "N_paths": 20_000,
+            "M": 50,
+            "kappa": 3,
+            "variance_mode": "simplified",
+            "keys": None,
+            "scheduler": "cosine",
+            "warmup_steps": 30,
+            "cosine_power": 0.5,
+            "H_lr_factor": 0.5,
+            "grad_clip_norm": 1.0,
+        },
+        "stage2": {
+            "iterations": 600,
+            "lr": 1e-3,
+            "N_paths": 30_000,
+            "M": 100,
+            "variance_mode": "full",
+            "keys": None,
+            "scheduler": "cosine",
+            "warmup_steps": 30,
+            "cosine_power": 0.5,
+        },
+    },
+
+    "hybrid_two_stage": {
+        "stage1": {
+            "iterations": 400,
+            "lr": 5e-3,
+            "N_paths": 20_000,
+            "M": 50,
+            "kappa": 3,
+            "variance_mode": "simplified",
+            "keys": None,
+            "scheduler": "cosine",
+            "warmup_steps": 30,
+            "cosine_power": 0.5,
+            "H_lr_factor": 0.5,
+            "grad_clip_norm": 1.0,
+        },
+        "stage2": {
+            "iterations": 600,
+            "lr": 1e-3,
+            "N_paths": 30_000,
+            "M": 100,
+            "kappa": 3,
+            "variance_mode": "full",
+            "keys": None,
+            "scheduler": "cosine",
+            "warmup_steps": 30,
+            "cosine_power": 0.5,
+            "grad_clip_norm": 1.0,
+        },
+    },
+
+    "roughness": {
+        "rough_results_file": "amcc_calibration_results.pt",
+        "H_values": [round(0.05 * i, 2) for i in range(1, 11)],
+        "fixed_H": {
+            "eta_init": 1.5,
+            "iterations": 1200,
+            "lr": 5e-3,
+            "N_paths": 30_000,
+            "M": 50,
+            "variance_mode": "full",
+            "scheduler": "cosine",
+            "warmup_steps": 50,
+            "cosine_power": 0.5,
+            "early_stop_patience": 200,
+        },
+    },
+
+    "two_stage": {
+        "stage1": {
+            "iterations": 800,
+            "lr": 5e-3,
+            "N_paths": 10_000,
+            "M": 50,
+            "keys": None,
+        },
+        "stage2": {
+            "iterations": 800,
+            "lr": 5e-3,
+            "N_paths": 30_000,
+            "M": 50,
+            "variance_mode": "full",
+            "keys": None,
+            "scheduler": "cosine",
+            "warmup_steps": 30,
+            "cosine_power": 0.5,
         },
     },
 
@@ -322,8 +313,7 @@ def _resolve_diag_scheme(cfg):
     raw = cfg.get("diag_scheme", "exact")
     if raw == "auto":
         scheme = "hybrid" if cfg["mode"] in (
-            "hybrid", "hybrid_two_stage", "adachi", "cross") else "exact"
-        # hybrid_exact uses exact Cholesky in stage 2, so diag should be exact
+            "adachi", "cross", "hybrid", "hybrid_two_stage") else "exact"
         print(f"  diag_scheme=auto → resolved to '{scheme}' "
               f"(matches calibration mode)")
         return scheme
@@ -467,7 +457,7 @@ def initialise_h05(mkt, eta_init=1.5):
 
 def _run_hybrid_stage(params, mkt, cfg, scfg, *,
                       freeze_H=False, crn_offset=0, label=""):
-    """Run a single hybrid BLP calibration stage. Shared by Modes A and C."""
+    """Run a single hybrid BLP calibration stage."""
     print(f"\n{'=' * 60}")
     h_status = (f"H frozen at {params.get_H().item():.4f}"
                 if freeze_H else "H differentiable")
@@ -522,8 +512,195 @@ def _run_hybrid_stage(params, mkt, cfg, scfg, *,
     return result
 
 
-def run_mode_a(params, mkt, cfg):
-    """Mode A: Single-stage hybrid calibration."""
+def run_mode_adachi(params, mkt, cfg):
+    """Adachi-style separated calibration.
+
+    Stage 1: Calibrate H, η, α, ρ₀ from 1Y-tenor smiles (single-rate
+             swaptions where ρ_{ij} is irrelevant). Inter-rate correlations
+             ρ are frozen via gradient hook.
+    Stage 2: Calibrate ρ_{ij} (ω angles) from co-terminal ATM swaptions
+             (multi-rate, where ρ_{ij} governs the ATM level). All other
+             parameters frozen; ρ₀ frozen via gradient hook.
+    """
+    dcfg = cfg["adachi"]
+    s1cfg = dcfg["stage1"]
+    s2cfg = dcfg["stage2"]
+
+    keys_1y = sorted([k for k in mkt.swaptions.keys() if k[1] == 1])
+    keys_multi = sorted([k for k in mkt.swaptions.keys() if k[1] > 1])
+
+    print(f"\n  1Y-tenor keys (Stage 1): {keys_1y}")
+    print(f"  Multi-rate keys (Stage 2): {keys_multi}")
+
+    # Stage 1: 1Y-tenor smiles → H, η, α, ρ₀
+    print(f"\n{'=' * 60}")
+    print("STAGE 1 (Adachi): 1Y-tenor smiles — H, η, α, ρ₀ free")
+    print("=" * 60)
+    print(f"  {s1cfg['iterations']} iterations, {s1cfg['N_paths']:,} paths, "
+          f"{s1cfg['M']} steps, lr={s1cfg['lr']}")
+
+    params.unfix_H()
+
+    rho_hook = params.register_freeze_rho_hook()
+
+    h_lr = s1cfg.get("H_lr_factor", 1.0)
+    gc = s1cfg.get("grad_clip_norm", 10.0)
+    if h_lr != 1.0:
+        print(f"  H_lr_factor={h_lr}, grad_clip_norm={gc}")
+
+    stage1_result = calibrate(
+        params, mkt,
+        n_iterations=s1cfg["iterations"],
+        lr=s1cfg["lr"],
+        N_paths=s1cfg["N_paths"],
+        M=s1cfg["M"],
+        scheme="hybrid",
+        hybrid_kappa=s1cfg["kappa"],
+        variance_curve_mode=s1cfg["variance_mode"],
+        use_crn=True,
+        crn_seed=cfg["crn_seed"],
+        log_every=20,
+        swaption_keys=keys_1y,
+        scheduler_type=s1cfg.get("scheduler", "cosine"),
+        warmup_steps=s1cfg.get("warmup_steps", 30),
+        cosine_power=s1cfg.get("cosine_power", 0.5),
+        early_stop_patience=cfg.get("early_stop_patience", 150),
+        early_stop_tol=cfg.get("early_stop_tol", 1e-4),
+        H_lr_factor=h_lr,
+        grad_clip_norm=gc,
+    )
+
+    rho_hook.remove()
+
+    if stage1_result["best_state"] is not None:
+        params.load_state_dict(stage1_result["best_state"])
+
+    with torch.no_grad():
+        H_val = params.get_H().item()
+        eta_val = params.get_eta().item()
+        kappa_val = eta_val * np.sqrt(2.0 * H_val)
+    print(f"\nStage 1 complete. H = {H_val:.4f}, "
+          f"η = {eta_val:.4f}, κ = {kappa_val:.4f}")
+
+    _rematch_alpha(params, mkt, cfg,
+                   label="Inter-stage α re-matching (MC-based Brent)")
+
+    # Stage 2: Co-terminal ATM swaptions → ρ_{ij}
+    print(f"\n{'=' * 60}")
+    print("STAGE 2 (Adachi): Multi-rate ATM swaptions — only ω (ρ_{ij}) free")
+    print("=" * 60)
+    print(f"  {s2cfg['iterations']} iterations, {s2cfg['N_paths']:,} paths, "
+          f"{s2cfg['M']} steps, lr={s2cfg['lr']}")
+
+    params.fix_H()
+    params.alpha_tilde.requires_grad_(False)
+    params.eta_tilde.requires_grad_(False)
+
+    rho0_hook = params.register_freeze_rho0_hook()
+
+    gc2 = s2cfg.get("grad_clip_norm", 10.0)
+
+    stage2_result = calibrate(
+        params, mkt,
+        n_iterations=s2cfg["iterations"],
+        lr=s2cfg["lr"],
+        N_paths=s2cfg["N_paths"],
+        M=s2cfg["M"],
+        scheme="hybrid",
+        hybrid_kappa=s2cfg["kappa"],
+        variance_curve_mode=s2cfg["variance_mode"],
+        use_crn=True,
+        crn_seed=cfg["crn_seed"] + 10000,
+        log_every=20,
+        swaption_keys=keys_multi,
+        scheduler_type=s2cfg.get("scheduler", "cosine"),
+        warmup_steps=s2cfg.get("warmup_steps", 20),
+        cosine_power=s2cfg.get("cosine_power", 0.5),
+        early_stop_patience=cfg.get("early_stop_patience", 150),
+        early_stop_tol=cfg.get("early_stop_tol", 1e-4),
+        grad_clip_norm=gc2,
+        atm_only=True,
+    )
+
+    rho0_hook.remove()
+
+    if stage2_result["best_state"] is not None:
+        params.load_state_dict(stage2_result["best_state"])
+
+    params.unfix_H()
+    params.alpha_tilde.requires_grad_(True)
+    params.eta_tilde.requires_grad_(True)
+    params.fix_H()
+
+    with torch.no_grad():
+        p = params()
+        print(f"\nStage 2 complete.")
+        print(f"  ρ diag check: {torch.diag(p['rho']).numpy()}")
+        print(f"  ρ₀ = [{', '.join(f'{r:.3f}' for r in p['rho0'].numpy())}]")
+
+    _rematch_alpha(params, mkt, cfg,
+                   label="Post-calibration α re-matching (MC-based Brent)")
+
+    return {
+        "stage1": stage1_result,
+        "stage2": stage2_result,
+    }
+
+
+def run_mode_cross(params, mkt, cfg):
+    """Cross-validation with train/test split.
+
+    Splits swaptions into train and test sets. Runs hybrid two-stage
+    calibration on train keys only. Returns result with split info for
+    separate train/test diagnostics.
+    """
+    ccfg = cfg["cross"]
+
+    all_keys = sorted(mkt.swaptions.keys())
+    test_keys = [k for k in ccfg["test_keys"] if k in mkt.swaptions]
+    train_keys = [k for k in all_keys if k not in test_keys]
+
+    test_1y = [k for k in test_keys if k[1] == 1]
+    if test_1y:
+        print(f"  Moving 1Y-tenor test keys to train: {test_1y}")
+        for k in test_1y:
+            test_keys.remove(k)
+            train_keys.append(k)
+        train_keys.sort()
+
+    print(f"\n  Train ({len(train_keys)} swaptions — used in optimiser):")
+    for k in train_keys:
+        print(f"    {k[0]:.0f}Y×{k[1]:.0f}Y")
+    print(f"\n  Test ({len(test_keys)} swaptions — held out):")
+    for k in test_keys:
+        print(f"    {k[0]:.0f}Y×{k[1]:.0f}Y")
+
+    s1cfg = {**ccfg["stage1"], "keys": train_keys}
+    stage1_result = _run_hybrid_stage(
+        params, mkt, cfg, s1cfg,
+        freeze_H=False, crn_offset=0, label="STAGE 1 (train)")
+
+    _rematch_alpha(params, mkt, cfg, N_paths=50_000, M=ccfg["stage2"]["M"],
+                   label="Inter-stage α re-matching (MC-based Brent)")
+
+    s2cfg = {**ccfg["stage2"], "keys": train_keys}
+    stage2_result = _run_hybrid_stage(
+        params, mkt, cfg, s2cfg,
+        freeze_H=True, crn_offset=10000, label="STAGE 2 (train)")
+
+    _rematch_alpha(params, mkt, cfg,
+                   label="Post-calibration α re-matching (MC-based Brent)")
+
+    return {
+        "stage1": stage1_result,
+        "stage2": stage2_result,
+        "train_keys": train_keys,
+        "test_keys": test_keys,
+    }
+
+
+def run_mode_hybrid(params, mkt, cfg):
+    """Single-stage hybrid calibration."""
     hcfg = cfg["hybrid"]
     result = _run_hybrid_stage(
         params, mkt, cfg, hcfg,
@@ -535,39 +712,14 @@ def run_mode_a(params, mkt, cfg):
     return {"history": result["history"]}
 
 
-def run_mode_c(params, mkt, cfg):
-    """Mode C: Hybrid two-stage calibration (recommended)."""
-    h2cfg = cfg["hybrid_two_stage"]
+def run_mode_hybrid_exact(params, mkt, cfg):
+    """Hybrid → Exact two-stage calibration.
 
-    stage1_result = _run_hybrid_stage(
-        params, mkt, cfg, h2cfg["stage1"],
-        freeze_H=False, crn_offset=0, label="STAGE 1")
-
-    _rematch_alpha(params, mkt, cfg, N_paths=50_000, M=h2cfg["stage2"]["M"],
-                   label="Inter-stage α re-matching (MC-based Brent)")
-
-    stage2_result = _run_hybrid_stage(
-        params, mkt, cfg, h2cfg["stage2"],
-        freeze_H=True, crn_offset=10000, label="STAGE 2")
-
-    _rematch_alpha(params, mkt, cfg,
-                   label="Post-calibration α re-matching (MC-based Brent)")
-
-    return {
-        "stage1": stage1_result,
-        "stage2": stage2_result,
-    }
-
-
-def run_mode_g(params, mkt, cfg):
-    """Mode G: Hybrid → Exact two-stage calibration.
-
-    Stage 1: Hybrid BLP scheme with H differentiable (same as Mode C stage 1).
-    Stage 2: Exact Cholesky scheme with H frozen (same as Mode B stage 2).
+    Stage 1: Hybrid BLP scheme with H differentiable.
+    Stage 2: Exact Cholesky scheme with H frozen.
     """
     gecfg = cfg["hybrid_exact"]
 
-    # --- Stage 1: Hybrid BLP ---
     stage1_result = _run_hybrid_stage(
         params, mkt, cfg, gecfg["stage1"],
         freeze_H=False, crn_offset=0, label="STAGE 1 (hybrid)")
@@ -575,7 +727,6 @@ def run_mode_g(params, mkt, cfg):
     _rematch_alpha(params, mkt, cfg, N_paths=50_000, M=gecfg["stage2"]["M"],
                    label="Inter-stage α re-matching (MC-based Brent)")
 
-    # --- Stage 2: Exact Cholesky ---
     s2cfg = gecfg["stage2"]
     with torch.no_grad():
         H_val = params.get_H().item()
@@ -625,176 +776,21 @@ def run_mode_g(params, mkt, cfg):
     }
 
 
-def run_mode_b(params, mkt, cfg):
-    """Mode B: Legacy two-stage calibration (approx → exact Cholesky)."""
-    s1cfg = cfg["two_stage"]["stage1"]
-    s2cfg = cfg["two_stage"]["stage2"]
+def run_mode_hybrid_two_stage(params, mkt, cfg):
+    """Hybrid two-stage calibration (recommended)."""
+    h2cfg = cfg["hybrid_two_stage"]
 
-    result = calibrate_two_stage(
-        params, mkt,
-        stage1_iterations=s1cfg["iterations"],
-        stage1_lr=s1cfg["lr"],
-        stage1_N_paths=s1cfg["N_paths"],
-        stage1_M=s1cfg["M"],
-        stage1_keys=s1cfg["keys"],
-        stage2_iterations=s2cfg["iterations"],
-        stage2_lr=s2cfg["lr"],
-        stage2_N_paths=s2cfg["N_paths"],
-        stage2_M=s2cfg["M"],
-        stage2_variance_mode=s2cfg["variance_mode"],
-        stage2_keys=s2cfg["keys"],
-        stage2_scheduler=s2cfg.get("scheduler", "cosine"),
-        stage2_warmup_steps=s2cfg.get("warmup_steps", 30),
-        stage2_cosine_power=s2cfg.get("cosine_power", 0.5),
-        use_crn=True,
-        crn_seed=cfg["crn_seed"],
-        log_every=20,
-        early_stop_patience=cfg.get("early_stop_patience", 150),
-        early_stop_tol=cfg.get("early_stop_tol", 1e-4),
-    )
+    stage1_result = _run_hybrid_stage(
+        params, mkt, cfg, h2cfg["stage1"],
+        freeze_H=False, crn_offset=0, label="STAGE 1")
 
-    return result
-
-
-def run_mode_d(params, mkt, cfg):
-    """Mode D: Adachi-style separated calibration.
-
-    Stage 1: Calibrate H, η, α, ρ₀ from 1Y-tenor smiles (single-rate
-             swaptions where ρ_{ij} is irrelevant). Inter-rate correlations
-             ρ are frozen via gradient hook.
-    Stage 2: Calibrate ρ_{ij} (ω angles) from co-terminal ATM swaptions
-             (multi-rate, where ρ_{ij} governs the ATM level). All other
-             parameters frozen; ρ₀ frozen via gradient hook.
-    """
-    dcfg = cfg["adachi"]
-    s1cfg = dcfg["stage1"]
-    s2cfg = dcfg["stage2"]
-
-    # --- Identify instrument groups ---
-    keys_1y = sorted([k for k in mkt.swaptions.keys() if k[1] == 1])
-    keys_multi = sorted([k for k in mkt.swaptions.keys() if k[1] > 1])
-
-    print(f"\n  1Y-tenor keys (Stage 1): {keys_1y}")
-    print(f"  Multi-rate keys (Stage 2): {keys_multi}")
-
-    # =====================================================================
-    # Stage 1: 1Y-tenor smiles → H, η, α, ρ₀
-    # =====================================================================
-    print(f"\n{'=' * 60}")
-    print("STAGE 1 (Adachi): 1Y-tenor smiles — H, η, α, ρ₀ free")
-    print("=" * 60)
-    print(f"  {s1cfg['iterations']} iterations, {s1cfg['N_paths']:,} paths, "
-          f"{s1cfg['M']} steps, lr={s1cfg['lr']}")
-
-    params.unfix_H()
-
-    # Freeze inter-rate correlations ρ_{ij} via gradient hook on ω[:, 1:]
-    # (ρ₀ remains free via ω[:, 0])
-    rho_hook = params.register_freeze_rho_hook()
-
-    h_lr = s1cfg.get("H_lr_factor", 1.0)
-    gc = s1cfg.get("grad_clip_norm", 10.0)
-    if h_lr != 1.0:
-        print(f"  H_lr_factor={h_lr}, grad_clip_norm={gc}")
-
-    stage1_result = calibrate(
-        params, mkt,
-        n_iterations=s1cfg["iterations"],
-        lr=s1cfg["lr"],
-        N_paths=s1cfg["N_paths"],
-        M=s1cfg["M"],
-        scheme="hybrid",
-        hybrid_kappa=s1cfg["kappa"],
-        variance_curve_mode=s1cfg["variance_mode"],
-        use_crn=True,
-        crn_seed=cfg["crn_seed"],
-        log_every=20,
-        swaption_keys=keys_1y,
-        scheduler_type=s1cfg.get("scheduler", "cosine"),
-        warmup_steps=s1cfg.get("warmup_steps", 30),
-        cosine_power=s1cfg.get("cosine_power", 0.5),
-        early_stop_patience=cfg.get("early_stop_patience", 150),
-        early_stop_tol=cfg.get("early_stop_tol", 1e-4),
-        H_lr_factor=h_lr,
-        grad_clip_norm=gc,
-    )
-
-    rho_hook.remove()
-
-    if stage1_result["best_state"] is not None:
-        params.load_state_dict(stage1_result["best_state"])
-
-    with torch.no_grad():
-        H_val = params.get_H().item()
-        eta_val = params.get_eta().item()
-        kappa_val = eta_val * np.sqrt(2.0 * H_val)
-    print(f"\nStage 1 complete. H = {H_val:.4f}, "
-          f"η = {eta_val:.4f}, κ = {kappa_val:.4f}")
-
-    # Inter-stage α re-match
-    _rematch_alpha(params, mkt, cfg,
+    _rematch_alpha(params, mkt, cfg, N_paths=50_000, M=h2cfg["stage2"]["M"],
                    label="Inter-stage α re-matching (MC-based Brent)")
 
-    # =====================================================================
-    # Stage 2: Co-terminal ATM swaptions → ρ_{ij}
-    # =====================================================================
-    print(f"\n{'=' * 60}")
-    print("STAGE 2 (Adachi): Multi-rate ATM swaptions — only ω (ρ_{ij}) free")
-    print("=" * 60)
-    print(f"  {s2cfg['iterations']} iterations, {s2cfg['N_paths']:,} paths, "
-          f"{s2cfg['M']} steps, lr={s2cfg['lr']}")
+    stage2_result = _run_hybrid_stage(
+        params, mkt, cfg, h2cfg["stage2"],
+        freeze_H=True, crn_offset=10000, label="STAGE 2")
 
-    # Freeze everything except ω angles
-    params.fix_H()
-    params.alpha_tilde.requires_grad_(False)
-    params.eta_tilde.requires_grad_(False)
-
-    # Freeze ρ₀ via gradient hook on ω[:, 0], keep ρ_{ij} free via ω[:, 1:]
-    rho0_hook = params.register_freeze_rho0_hook()
-
-    gc2 = s2cfg.get("grad_clip_norm", 10.0)
-
-    stage2_result = calibrate(
-        params, mkt,
-        n_iterations=s2cfg["iterations"],
-        lr=s2cfg["lr"],
-        N_paths=s2cfg["N_paths"],
-        M=s2cfg["M"],
-        scheme="hybrid",
-        hybrid_kappa=s2cfg["kappa"],
-        variance_curve_mode=s2cfg["variance_mode"],
-        use_crn=True,
-        crn_seed=cfg["crn_seed"] + 10000,
-        log_every=20,
-        swaption_keys=keys_multi,
-        scheduler_type=s2cfg.get("scheduler", "cosine"),
-        warmup_steps=s2cfg.get("warmup_steps", 20),
-        cosine_power=s2cfg.get("cosine_power", 0.5),
-        early_stop_patience=cfg.get("early_stop_patience", 150),
-        early_stop_tol=cfg.get("early_stop_tol", 1e-4),
-        grad_clip_norm=gc2,
-        atm_only=True,
-    )
-
-    rho0_hook.remove()
-
-    if stage2_result["best_state"] is not None:
-        params.load_state_dict(stage2_result["best_state"])
-
-    # Restore requires_grad for all parameters (needed for diagnostics)
-    params.unfix_H()
-    params.alpha_tilde.requires_grad_(True)
-    params.eta_tilde.requires_grad_(True)
-    # Re-freeze H at calibrated value for consistency
-    params.fix_H()
-
-    with torch.no_grad():
-        p = params()
-        print(f"\nStage 2 complete.")
-        print(f"  ρ diag check: {torch.diag(p['rho']).numpy()}")
-        print(f"  ρ₀ = [{', '.join(f'{r:.3f}' for r in p['rho0'].numpy())}]")
-
-    # Post-calibration α re-match
     _rematch_alpha(params, mkt, cfg,
                    label="Post-calibration α re-matching (MC-based Brent)")
 
@@ -805,7 +801,7 @@ def run_mode_d(params, mkt, cfg):
 
 
 def run_mode_roughness(mkt, cfg):
-    """Mode E: Roughness ablation — sweep fixed H values and compare.
+    """Roughness ablation — sweep fixed H values and compare.
 
     Loads existing rough calibration (H free) from file, then calibrates
     a model for each fixed H value in the configured sweep (default
@@ -815,7 +811,6 @@ def run_mode_roughness(mkt, cfg):
     hcfg = rcfg["fixed_H"]
     H_values = rcfg["H_values"]
 
-    # --- Load rough parameters ---
     rough_file = rcfg["rough_results_file"]
     if not os.path.exists(rough_file):
         print(f"\n  {rough_file} not found.")
@@ -840,7 +835,6 @@ def run_mode_roughness(mkt, cfg):
     print(f"  κ     = {kappa_rough:.4f}")
     print(f"  α     = [{', '.join(f'{a:.4f}' for a in p_r['alpha'].numpy())}]")
 
-    # --- Calibrate fixed-H models ---
     fixed_models = {}
     for H_val in H_values:
         print("\n" + "#" * 60)
@@ -898,59 +892,35 @@ def run_mode_roughness(mkt, cfg):
     }
 
 
-def run_mode_cross(params, mkt, cfg):
-    """Mode F: Cross-validation with train/test split.
+def run_mode_two_stage(params, mkt, cfg):
+    """Legacy two-stage calibration (approx → exact Cholesky)."""
+    s1cfg = cfg["two_stage"]["stage1"]
+    s2cfg = cfg["two_stage"]["stage2"]
 
-    Splits swaptions into train and test sets. Runs hybrid two-stage
-    calibration on train keys only. Returns result with split info for
-    separate train/test diagnostics.
-    """
-    ccfg = cfg["cross"]
+    result = calibrate_two_stage(
+        params, mkt,
+        stage1_iterations=s1cfg["iterations"],
+        stage1_lr=s1cfg["lr"],
+        stage1_N_paths=s1cfg["N_paths"],
+        stage1_M=s1cfg["M"],
+        stage1_keys=s1cfg["keys"],
+        stage2_iterations=s2cfg["iterations"],
+        stage2_lr=s2cfg["lr"],
+        stage2_N_paths=s2cfg["N_paths"],
+        stage2_M=s2cfg["M"],
+        stage2_variance_mode=s2cfg["variance_mode"],
+        stage2_keys=s2cfg["keys"],
+        stage2_scheduler=s2cfg.get("scheduler", "cosine"),
+        stage2_warmup_steps=s2cfg.get("warmup_steps", 30),
+        stage2_cosine_power=s2cfg.get("cosine_power", 0.5),
+        use_crn=True,
+        crn_seed=cfg["crn_seed"],
+        log_every=20,
+        early_stop_patience=cfg.get("early_stop_patience", 150),
+        early_stop_tol=cfg.get("early_stop_tol", 1e-4),
+    )
 
-    all_keys = sorted(mkt.swaptions.keys())
-    test_keys = [k for k in ccfg["test_keys"] if k in mkt.swaptions]
-    train_keys = [k for k in all_keys if k not in test_keys]
-
-    # 1Y-tenor keys must be in train (needed for α matching)
-    test_1y = [k for k in test_keys if k[1] == 1]
-    if test_1y:
-        print(f"  Moving 1Y-tenor test keys to train: {test_1y}")
-        for k in test_1y:
-            test_keys.remove(k)
-            train_keys.append(k)
-        train_keys.sort()
-
-    print(f"\n  Train ({len(train_keys)} swaptions — used in optimiser):")
-    for k in train_keys:
-        print(f"    {k[0]:.0f}Y×{k[1]:.0f}Y")
-    print(f"\n  Test ({len(test_keys)} swaptions — held out):")
-    for k in test_keys:
-        print(f"    {k[0]:.0f}Y×{k[1]:.0f}Y")
-
-    # Stage 1: H free, train keys only
-    s1cfg = {**ccfg["stage1"], "keys": train_keys}
-    stage1_result = _run_hybrid_stage(
-        params, mkt, cfg, s1cfg,
-        freeze_H=False, crn_offset=0, label="STAGE 1 (train)")
-
-    _rematch_alpha(params, mkt, cfg, N_paths=50_000, M=ccfg["stage2"]["M"],
-                   label="Inter-stage α re-matching (MC-based Brent)")
-
-    # Stage 2: H frozen, train keys only
-    s2cfg = {**ccfg["stage2"], "keys": train_keys}
-    stage2_result = _run_hybrid_stage(
-        params, mkt, cfg, s2cfg,
-        freeze_H=True, crn_offset=10000, label="STAGE 2 (train)")
-
-    _rematch_alpha(params, mkt, cfg,
-                   label="Post-calibration α re-matching (MC-based Brent)")
-
-    return {
-        "stage1": stage1_result,
-        "stage2": stage2_result,
-        "train_keys": train_keys,
-        "test_keys": test_keys,
-    }
+    return result
 
 
 # =============================================================================
@@ -1542,7 +1512,7 @@ def save_smile_plots(params, mkt, config, filename="amcc_smile_fits.png",
     raw_scheme = config.get("diag_scheme", "exact")
     if raw_scheme == "auto":
         diag_scheme = "hybrid" if config.get("mode") in (
-            "hybrid", "hybrid_two_stage", "adachi", "cross") else "exact"
+            "adachi", "cross", "hybrid", "hybrid_two_stage") else "exact"
     else:
         diag_scheme = raw_scheme
     diag_kappa = config.get("diag_hybrid_kappa", 3)
@@ -1963,10 +1933,73 @@ if __name__ == "__main__":
     )
     print_market_summary(mkt)
 
-    # =====================================================================
-    # MODE E: Roughness ablation
-    # =====================================================================
-    if mode == "roughness":
+    if mode == "cross":
+        print("\n" + "#" * 60)
+        print("# INITIALISATION")
+        print("#" * 60)
+
+        params = initialise_params(mkt, H_init=0.20, eta_init=1.8)
+
+        print("\n" + "#" * 60)
+        print("# AMCC CALIBRATION (train set only)")
+        print("#" * 60)
+
+        result = run_mode_cross(params, mkt, cfg)
+        train_keys = result["train_keys"]
+        test_keys = result["test_keys"]
+
+        with torch.no_grad():
+            H_calibrated = params.get_H().item()
+
+        print_calibrated_params(params, mkt)
+
+        diag_scheme = _resolve_diag_scheme(cfg)
+        diag_kappa = cfg.get("diag_hybrid_kappa", 3)
+
+        run_cross_diagnostics(
+            params, mkt, cfg, diag_scheme, diag_kappa,
+            train_keys, test_keys)
+
+        print("\n" + "#" * 60)
+        print("# GENERATING PLOTS")
+        print("#" * 60)
+
+        save_plots(
+            params, mkt,
+            history=result["stage1"]["history"],
+            config=cfg,
+            history2=result["stage2"]["history"],
+            test_keys=test_keys,
+        )
+
+        elapsed = time.time() - t_start
+        with torch.no_grad():
+            p = params()
+        results = {
+            "config": cfg,
+            "mode": mode,
+            "params_state_dict": params.state_dict(),
+            "H": p["H"].item(),
+            "eta": p["eta"].item(),
+            "alpha": p["alpha"].numpy(),
+            "rho0": p["rho0"].numpy(),
+            "rho": p["rho"].numpy(),
+            "Sigma": p["Sigma"].numpy(),
+            "H_calibrated": H_calibrated,
+            "train_keys": train_keys,
+            "test_keys": test_keys,
+            "stage1_history": result["stage1"]["history"],
+            "stage2_history": result["stage2"]["history"],
+            "H_grad_norms": [
+                r.get("grad_norms", {}).get("H_tilde", 0.0)
+                for r in result["stage1"]["history"]
+            ],
+            "elapsed_seconds": elapsed,
+        }
+        torch.save(results, "amcc_calibration_results.pt")
+        print(f"\nResults saved to amcc_calibration_results.pt")
+
+    elif mode == "roughness":
         H_values = cfg["roughness"]["H_values"]
         print("\n" + "=" * 72)
         print(f"ROUGHNESS ABLATION STUDY: H free vs fixed H ∈ "
@@ -1977,7 +2010,6 @@ if __name__ == "__main__":
         params_rough = rr["params_rough"]
         fixed_models = rr["fixed_models"]
 
-        # Diagnostics — rough
         diag_scheme = _resolve_diag_scheme(cfg)
         diag_kappa = cfg.get("diag_hybrid_kappa", 3)
 
@@ -1987,7 +2019,6 @@ if __name__ == "__main__":
             scheme=diag_scheme, hybrid_kappa=diag_kappa,
         )
 
-        # Diagnostics — each fixed H
         reports_fixed = {}
         for H_val in H_values:
             reports_fixed[H_val] = mc_diagnostics(
@@ -1997,7 +2028,6 @@ if __name__ == "__main__":
                 scheme="exact", hybrid_kappa=diag_kappa,
             )
 
-        # Head-to-head comparison vs H=0.5
         params_h05 = fixed_models[0.5]["params"]
         report_h05 = reports_fixed[0.5]
 
@@ -2007,7 +2037,6 @@ if __name__ == "__main__":
 
         comparison = compare_reports(report_rough, report_h05, mkt)
 
-        # RMSE summary table across all H values
         print("\n" + "#" * 60)
         print("# RMSE ACROSS ALL FIXED H VALUES")
         print("#" * 60)
@@ -2048,7 +2077,6 @@ if __name__ == "__main__":
         print(f"\n  Best fixed H: {best_H:.2f} "
               f"(RMSE = {rmse_by_H[best_H]:.1f} bp)")
 
-        # Smile comparisons (selected swaptions)
         print("\n" + "#" * 60)
         print("# SMILE COMPARISONS (selected swaptions)")
         print("#" * 60)
@@ -2079,14 +2107,12 @@ if __name__ == "__main__":
                     scheme="exact", hybrid_kappa=diag_kappa,
                 )
 
-        # Plots (rough vs H=0.5 for backwards compatibility)
         print("\n" + "#" * 60)
         print("# GENERATING PLOTS")
         print("#" * 60)
 
         save_comparison_plots(params_rough, params_h05, mkt, cfg)
 
-        # Summary
         total_h05 = rmse_by_H.get(0.5, 0.0)
         delta_h05 = total_h05 - total_rmse_rough
         rel = delta_h05 / total_h05 * 100 if total_h05 > 0 else 0
@@ -2100,7 +2126,6 @@ if __name__ == "__main__":
         print(f"  Rough vs H=0.5 improvement: "
               f"{delta_h05:+.1f} bp  ({rel:+.1f}% relative)")
 
-        # Save
         elapsed = time.time() - t_start
         fixed_results = {}
         for H_val in H_values:
@@ -2128,111 +2153,35 @@ if __name__ == "__main__":
         torch.save(results, "roughness_ablation_results.pt")
         print(f"\nResults saved to roughness_ablation_results.pt")
 
-    # =====================================================================
-    # MODE F: Cross-validation
-    # =====================================================================
-    elif mode == "cross":
-        print("\n" + "#" * 60)
-        print("# INITIALISATION")
-        print("#" * 60)
-
-        params = initialise_params(mkt, H_init=0.20, eta_init=1.8)
-
-        print("\n" + "#" * 60)
-        print("# AMCC CALIBRATION (train set only)")
-        print("#" * 60)
-
-        result = run_mode_cross(params, mkt, cfg)
-        train_keys = result["train_keys"]
-        test_keys = result["test_keys"]
-
-        with torch.no_grad():
-            H_calibrated = params.get_H().item()
-
-        print_calibrated_params(params, mkt)
-
-        diag_scheme = _resolve_diag_scheme(cfg)
-        diag_kappa = cfg.get("diag_hybrid_kappa", 3)
-
-        run_cross_diagnostics(
-            params, mkt, cfg, diag_scheme, diag_kappa,
-            train_keys, test_keys)
-
-        # Plots
-        print("\n" + "#" * 60)
-        print("# GENERATING PLOTS")
-        print("#" * 60)
-
-        save_plots(
-            params, mkt,
-            history=result["stage1"]["history"],
-            config=cfg,
-            history2=result["stage2"]["history"],
-            test_keys=test_keys,
-        )
-
-        # Save
-        elapsed = time.time() - t_start
-        with torch.no_grad():
-            p = params()
-        results = {
-            "config": cfg,
-            "mode": mode,
-            "params_state_dict": params.state_dict(),
-            "H": p["H"].item(),
-            "eta": p["eta"].item(),
-            "alpha": p["alpha"].numpy(),
-            "rho0": p["rho0"].numpy(),
-            "rho": p["rho"].numpy(),
-            "Sigma": p["Sigma"].numpy(),
-            "H_calibrated": H_calibrated,
-            "train_keys": train_keys,
-            "test_keys": test_keys,
-            "stage1_history": result["stage1"]["history"],
-            "stage2_history": result["stage2"]["history"],
-            "H_grad_norms": [
-                r.get("grad_norms", {}).get("H_tilde", 0.0)
-                for r in result["stage1"]["history"]
-            ],
-            "elapsed_seconds": elapsed,
-        }
-        torch.save(results, "amcc_calibration_results.pt")
-        print(f"\nResults saved to amcc_calibration_results.pt")
-
-    # =====================================================================
-    # STANDARD CALIBRATION MODES (A, B, C, D)
-    # =====================================================================
     else:
-        # --- Initialise ---
+        # Standard calibration modes: adachi, hybrid, hybrid_exact,
+        # hybrid_two_stage, two_stage
         print("\n" + "#" * 60)
         print("# INITIALISATION")
         print("#" * 60)
 
         params = initialise_params(mkt, H_init=0.20, eta_init=1.8)
 
-        # --- Calibrate ---
         print("\n" + "#" * 60)
         print("# AMCC CALIBRATION")
         print("#" * 60)
 
-        if mode == "hybrid":
-            result = run_mode_a(params, mkt, cfg)
-        elif mode == "hybrid_two_stage":
-            result = run_mode_c(params, mkt, cfg)
+        if mode == "adachi":
+            result = run_mode_adachi(params, mkt, cfg)
+        elif mode == "hybrid":
+            result = run_mode_hybrid(params, mkt, cfg)
         elif mode == "hybrid_exact":
-            result = run_mode_g(params, mkt, cfg)
+            result = run_mode_hybrid_exact(params, mkt, cfg)
+        elif mode == "hybrid_two_stage":
+            result = run_mode_hybrid_two_stage(params, mkt, cfg)
         elif mode == "two_stage":
-            print(f"\nMode: two_stage (legacy)")
-            result = run_mode_b(params, mkt, cfg)
-        elif mode == "adachi":
-            result = run_mode_d(params, mkt, cfg)
+            result = run_mode_two_stage(params, mkt, cfg)
         else:
             raise ValueError(f"Unknown mode: {mode}")
 
         with torch.no_grad():
             H_calibrated = params.get_H().item()
 
-        # --- Report ---
         print_calibrated_params(params, mkt)
 
         diag_scheme = _resolve_diag_scheme(cfg)
@@ -2241,7 +2190,6 @@ if __name__ == "__main__":
         report_in, representative_keys = run_in_sample_diagnostics(
             params, mkt, cfg, diag_scheme, diag_kappa)
 
-        # --- Plots ---
         print("\n" + "#" * 60)
         print("# GENERATING PLOTS")
         print("#" * 60)
@@ -2256,7 +2204,6 @@ if __name__ == "__main__":
                      else result["stage2"]["history"],
         )
 
-        # --- Out-of-sample ---
         mkt_oos = load_market_data(
             cfg["data_file"],
             subset=cfg["subset"],
@@ -2277,7 +2224,6 @@ if __name__ == "__main__":
             suptitle=f"Out-of-sample smile fits ({cfg['out_sample_date']})",
         )
 
-        # --- Save results ---
         elapsed = time.time() - t_start
         with torch.no_grad():
             p = params()
@@ -2306,7 +2252,7 @@ if __name__ == "__main__":
         else:
             results["stage1_history"] = result["stage1"]["history"]
             results["stage2_history"] = result["stage2"]["history"]
-            if mode in ("hybrid_two_stage", "hybrid_exact", "adachi"):
+            if mode in ("adachi", "hybrid_exact", "hybrid_two_stage"):
                 results["H_grad_norms"] = [
                     r.get("grad_norms", {}).get("H_tilde", 0.0)
                     for r in result["stage1"]["history"]
