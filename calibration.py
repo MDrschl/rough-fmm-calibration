@@ -40,6 +40,7 @@ CONFIG = {
     #   "hybrid"            — Mode A: single-stage BLP, H differentiable
     #   "hybrid_two_stage"  — Mode C: two-stage BLP both stages, H frozen in S2
     #   "two_stage"         — Mode B: legacy, approx S1 → exact Cholesky S2
+    #   "hybrid_exact"      — Mode G: hybrid S1 → exact Cholesky S2
     #   "adachi"            — Mode D: Adachi-style, 1Y smiles → ρ_{ij} from ATM
     #   "roughness"         — Mode E: ablation study, H free vs H = 0.5
     #   "cross"             — Mode F: train/test split cross-validation
@@ -90,6 +91,35 @@ CONFIG = {
             "warmup_steps": 30,
             "cosine_power": 0.5,
             "grad_clip_norm": 1.0,
+        },
+    },
+
+    # --- Mode G: Hybrid → Exact two-stage ---
+    "hybrid_exact": {
+        "stage1": {
+            "iterations": 400,
+            "lr": 5e-3,
+            "N_paths": 20_000,
+            "M": 50,
+            "kappa": 3,
+            "variance_mode": "simplified",
+            "keys": None,
+            "scheduler": "cosine",
+            "warmup_steps": 30,
+            "cosine_power": 0.5,
+            "H_lr_factor": 0.5,
+            "grad_clip_norm": 1.0,
+        },
+        "stage2": {
+            "iterations": 600,
+            "lr": 1e-3,
+            "N_paths": 30_000,
+            "M": 100,
+            "variance_mode": "full",
+            "keys": None,
+            "scheduler": "cosine",
+            "warmup_steps": 30,
+            "cosine_power": 0.5,
         },
     },
 
@@ -292,6 +322,7 @@ def _resolve_diag_scheme(cfg):
     if raw == "auto":
         scheme = "hybrid" if cfg["mode"] in (
             "hybrid", "hybrid_two_stage", "adachi", "cross") else "exact"
+        # hybrid_exact uses exact Cholesky in stage 2, so diag should be exact
         print(f"  diag_scheme=auto → resolved to '{scheme}' "
               f"(matches calibration mode)")
         return scheme
@@ -512,6 +543,72 @@ def run_mode_c(params, mkt, cfg):
     stage2_result = _run_hybrid_stage(
         params, mkt, cfg, h2cfg["stage2"],
         freeze_H=True, crn_offset=10000, label="STAGE 2")
+
+    _rematch_alpha(params, mkt, cfg,
+                   label="Post-calibration α re-matching (MC-based Brent)")
+
+    return {
+        "stage1": stage1_result,
+        "stage2": stage2_result,
+    }
+
+
+def run_mode_g(params, mkt, cfg):
+    """Mode G: Hybrid → Exact two-stage calibration.
+
+    Stage 1: Hybrid BLP scheme with H differentiable (same as Mode C stage 1).
+    Stage 2: Exact Cholesky scheme with H frozen (same as Mode B stage 2).
+    """
+    gecfg = cfg["hybrid_exact"]
+
+    # --- Stage 1: Hybrid BLP ---
+    stage1_result = _run_hybrid_stage(
+        params, mkt, cfg, gecfg["stage1"],
+        freeze_H=False, crn_offset=0, label="STAGE 1 (hybrid)")
+
+    _rematch_alpha(params, mkt, cfg, N_paths=50_000, M=gecfg["stage2"]["M"],
+                   label="Inter-stage α re-matching (MC-based Brent)")
+
+    # --- Stage 2: Exact Cholesky ---
+    s2cfg = gecfg["stage2"]
+    with torch.no_grad():
+        H_val = params.get_H().item()
+    print(f"\n{'=' * 60}")
+    print(f"STAGE 2 (exact): Exact Cholesky scheme "
+          f"(H fixed at {H_val:.4f})")
+    print("=" * 60)
+    print(f"  {s2cfg['iterations']} iterations, {s2cfg['N_paths']:,} paths, "
+          f"{s2cfg['M']} steps, lr={s2cfg['lr']}")
+
+    params.fix_H()
+
+    stage2_result = calibrate(
+        params, mkt,
+        n_iterations=s2cfg["iterations"],
+        lr=s2cfg["lr"],
+        N_paths=s2cfg["N_paths"],
+        M=s2cfg["M"],
+        use_exact=True,
+        variance_curve_mode=s2cfg["variance_mode"],
+        use_crn=True,
+        crn_seed=cfg["crn_seed"] + 10000,
+        log_every=20,
+        swaption_keys=s2cfg["keys"],
+        scheduler_type=s2cfg.get("scheduler", "cosine"),
+        warmup_steps=s2cfg.get("warmup_steps", 30),
+        cosine_power=s2cfg.get("cosine_power", 0.5),
+        early_stop_patience=cfg.get("early_stop_patience", 150),
+        early_stop_tol=cfg.get("early_stop_tol", 1e-4),
+    )
+
+    if stage2_result["best_state"] is not None:
+        params.load_state_dict(stage2_result["best_state"])
+
+    with torch.no_grad():
+        eta_val = params.get_eta().item()
+        kappa_val = eta_val * np.sqrt(2.0 * H_val)
+    print(f"\nStage 2 complete. H = {H_val:.4f}, "
+          f"η = {eta_val:.4f}, κ = {kappa_val:.4f}")
 
     _rematch_alpha(params, mkt, cfg,
                    label="Post-calibration α re-matching (MC-based Brent)")
@@ -2061,6 +2158,8 @@ if __name__ == "__main__":
             result = run_mode_a(params, mkt, cfg)
         elif mode == "hybrid_two_stage":
             result = run_mode_c(params, mkt, cfg)
+        elif mode == "hybrid_exact":
+            result = run_mode_g(params, mkt, cfg)
         elif mode == "two_stage":
             print(f"\nMode: two_stage (legacy)")
             result = run_mode_b(params, mkt, cfg)
@@ -2146,7 +2245,7 @@ if __name__ == "__main__":
         else:
             results["stage1_history"] = result["stage1"]["history"]
             results["stage2_history"] = result["stage2"]["history"]
-            if mode in ("hybrid_two_stage", "adachi"):
+            if mode in ("hybrid_two_stage", "hybrid_exact", "adachi"):
                 results["H_grad_norms"] = [
                     r.get("grad_norms", {}).get("H_tilde", 0.0)
                     for r in result["stage1"]["history"]
