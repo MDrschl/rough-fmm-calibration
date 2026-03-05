@@ -44,7 +44,7 @@ CONFIG = {
     #   "adachi"            — Adachi-style, 1Y smiles → ρ_{ij} from ATM
     #   "cross"             — train/test split cross-validation
     #   "roughness"         — ablation study, H free vs H = 0.5
-    "mode": "hybrid_two_stage",
+    "mode": "roughness",
 
     "hybrid": {
         "iterations": 800,
@@ -58,7 +58,7 @@ CONFIG = {
         "warmup_steps": 50,
         "cosine_power": 0.5,
         "early_stop_patience": 200,
-        "H_lr_factor": 0.5,
+        "H_lr_factor": 1.5,
         "grad_clip_norm": 1.0,
     },
 
@@ -74,7 +74,7 @@ CONFIG = {
             "scheduler": "cosine",
             "warmup_steps": 30,
             "cosine_power": 0.5,
-            "H_lr_factor": 0.5,
+            "H_lr_factor": 1.5,
             "grad_clip_norm": 1.0,
         },
         "stage2": {
@@ -104,7 +104,7 @@ CONFIG = {
             "scheduler": "cosine",
             "warmup_steps": 30,
             "cosine_power": 0.5,
-            "H_lr_factor": 0.5,
+            "H_lr_factor": 1.5,
             "grad_clip_norm": 1.0,
         },
         "stage2": {
@@ -152,7 +152,7 @@ CONFIG = {
             "scheduler": "cosine",
             "warmup_steps": 30,
             "cosine_power": 0.5,
-            "H_lr_factor": 0.5,
+            "H_lr_factor": 1.5,
             "grad_clip_norm": 1.0,
         },
         "stage2": {
@@ -187,7 +187,7 @@ CONFIG = {
             "scheduler": "cosine",
             "warmup_steps": 30,
             "cosine_power": 0.5,
-            "H_lr_factor": 0.5,
+            "H_lr_factor": 1.5,
             "grad_clip_norm": 1.0,
         },
         "stage2": {
@@ -324,7 +324,7 @@ def _resolve_diag_scheme(cfg):
 # Initialisation
 # =============================================================================
 
-def initialise_params(mkt, H_init=0.20, eta_init=2.3):
+def initialise_params(mkt, H_init=0.30, eta_init=1.6):
     """Create parameter module and warm-start all α via formula-based ATM matching."""
     params = MappedRoughSABRParams(N=mkt.N, device=mkt.device)
     params.set_H(H_init)
@@ -405,7 +405,7 @@ def initialise_params(mkt, H_init=0.20, eta_init=2.3):
     return params
 
 
-def initialise_fixed_H(mkt, H_val, eta_init=1.5):
+def initialise_fixed_H(mkt, H_val, eta_init=1.6):
     """Create parameter module with H fixed at a given value."""
     params = MappedRoughSABRParams(N=mkt.N, device=mkt.device)
     params.set_H(H_val)
@@ -446,7 +446,7 @@ def initialise_fixed_H(mkt, H_val, eta_init=1.5):
     return params
 
 
-def initialise_h05(mkt, eta_init=1.5):
+def initialise_h05(mkt, eta_init=1.6):
     """Create parameter module with H fixed at 0.5 (Markovian SABR)."""
     return initialise_fixed_H(mkt, 0.5, eta_init=eta_init)
 
@@ -874,7 +874,12 @@ def run_mode_roughness(mkt, cfg):
 
         params_h = initialise_fixed_H(mkt, H_val, eta_init=hcfg["eta_init"])
 
-        print(f"\n  Calibrating with H = {H_val:.2f} fixed...")
+        # Use dedicated SABR scheme for H ≈ 0.5 (no Cholesky needed)
+        is_markovian = H_val >= 0.49
+        h_scheme = "sabr" if is_markovian else "exact"
+
+        print(f"\n  Calibrating with H = {H_val:.2f} fixed "
+              f"(scheme={h_scheme})...")
         print(f"  {hcfg['iterations']} iterations, {hcfg['N_paths']:,} paths, "
               f"{hcfg['M']} steps, lr={hcfg['lr']}")
 
@@ -884,7 +889,7 @@ def run_mode_roughness(mkt, cfg):
             lr=hcfg["lr"],
             N_paths=hcfg["N_paths"],
             M=hcfg["M"],
-            use_exact=True,
+            scheme=h_scheme,
             variance_curve_mode=hcfg["variance_mode"],
             use_crn=True,
             crn_seed=cfg["crn_seed"],
@@ -1626,10 +1631,8 @@ def save_comparison_plots(params_rough, params_h05, mkt, cfg):
                 S_T_h = simulate_swaption(
                     params_h05, swn, mkt,
                     N_paths=50_000, M=80,
-                    use_exact=True,
                     variance_curve_mode="full",
-                    cholesky_cache=cache_h,
-                    scheme="exact", hybrid_kappa=diag_kappa,
+                    scheme="sabr",
                 )
                 mod_h = mc_prices_to_black_iv(
                     compute_swaption_prices(S_T_h, swn), swn).numpy() * 100
@@ -1673,7 +1676,7 @@ def save_comparison_plots(params_rough, params_h05, mkt, cfg):
         res_h = compute_model_smile(
             params_h05, swn, mkt, variance_curve_mode="full",
             N_paths=50_000, M=80, seed=cfg["crn_seed"],
-            scheme="exact", hybrid_kappa=diag_kappa,
+            scheme="sabr",
         )
         valid = ~torch.isnan(res_r["iv_errors"]) & ~torch.isnan(res_h["iv_errors"])
         if valid.sum() > 0:
@@ -1955,11 +1958,12 @@ if __name__ == "__main__":
 
         reports_fixed = {}
         for H_val in H_values:
+            h_scheme = "sabr" if H_val >= 0.49 else "exact"
             reports_fixed[H_val] = mc_diagnostics(
                 fixed_models[H_val]["params"], mkt,
                 label=f"Fixed H = {H_val:.2f}",
                 N_paths=cfg["diag_N_paths"], M=cfg["diag_M"],
-                scheme="exact", hybrid_kappa=diag_kappa,
+                scheme=h_scheme, hybrid_kappa=diag_kappa,
             )
 
         params_h05 = fixed_models[0.5]["params"]
@@ -2033,12 +2037,13 @@ if __name__ == "__main__":
                     scheme=diag_scheme, hybrid_kappa=diag_kappa,
                 )
                 print(f"  [Best fixed H={best_H:.2f}]")
+                best_scheme = "sabr" if best_H >= 0.49 else "exact"
                 print_smile_comparison(
                     fixed_models[best_H]["params"],
                     mkt.swaptions[key], mkt,
                     variance_curve_mode="full",
                     N_paths=cfg["diag_N_paths"], M=cfg["diag_M"],
-                    scheme="exact", hybrid_kappa=diag_kappa,
+                    scheme=best_scheme, hybrid_kappa=diag_kappa,
                 )
 
         print("\n" + "#" * 60)
@@ -2092,7 +2097,7 @@ if __name__ == "__main__":
         print("# INITIALISATION")
         print("#" * 60)
 
-        params = initialise_params(mkt, H_init=0.20, eta_init=1.8)
+        params = initialise_params(mkt, H_init=0.30, eta_init=1.6)
 
         print("\n" + "#" * 60)
         print("# AMCC CALIBRATION (train set only)")
@@ -2160,7 +2165,7 @@ if __name__ == "__main__":
         print("# INITIALISATION")
         print("#" * 60)
 
-        params = initialise_params(mkt, H_init=0.20, eta_init=1.8)
+        params = initialise_params(mkt, H_init=0.30, eta_init=1.6)
 
         print("\n" + "#" * 60)
         print("# AMCC CALIBRATION")
