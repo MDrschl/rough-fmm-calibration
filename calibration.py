@@ -43,7 +43,7 @@ CONFIG = {
     #   "adachi"            — Mode D: Adachi-style, 1Y smiles → ρ_{ij} from ATM
     #   "roughness"         — Mode E: ablation study, H free vs H = 0.5
     #   "cross"             — Mode F: train/test split cross-validation
-    "mode": "hybrid_two_stage",
+    "mode": "adachi",
 
     # --- Mode A: Single-stage hybrid ---
     "hybrid": {
@@ -100,6 +100,7 @@ CONFIG = {
             "lr": 5e-3,
             "N_paths": 10_000,
             "M": 50,
+            "variance_mode": "simplified",  # paper §6.1; use "full" if keys include multi-rate
             "keys": None,
         },
         "stage2": {
@@ -534,6 +535,7 @@ def run_mode_b(params, mkt, cfg):
         stage1_N_paths=s1cfg["N_paths"],
         stage1_M=s1cfg["M"],
         stage1_keys=s1cfg["keys"],
+        stage1_variance_mode=s1cfg["variance_mode"],
         stage2_iterations=s2cfg["iterations"],
         stage2_lr=s2cfg["lr"],
         stage2_N_paths=s2cfg["N_paths"],
