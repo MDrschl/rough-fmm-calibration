@@ -325,8 +325,11 @@ class MappedRoughSABRParams(nn.Module):
     def set_H(self, H_value: float):
         """Set H to a specific value (e.g., from grid search or Stage 1)."""
         with torch.no_grad():
-            x = 2.0 * H_value
-            self.H_tilde.fill_(np.log(x / (1.0 - x)))
+            if H_value >= 0.5:
+                self.H_tilde.fill_(20.0)  # sigmoid(20) ≈ 1, so H ≈ 0.5000
+            else:
+                x = 2.0 * H_value
+                self.H_tilde.fill_(np.log(x / (1.0 - x)))
 
     def set_eta(self, eta_value: float):
         """Set eta to a specific value."""
@@ -842,6 +845,85 @@ def simulate_hybrid(
 
     return torch.exp(log_S)
 
+def simulate_sabr(
+    S0: torch.Tensor,
+    v0: torch.Tensor,
+    eta: torch.Tensor,
+    rho_eff: torch.Tensor,
+    T: float,
+    M: int,
+    N_paths: int,
+    v_curve: Optional[torch.Tensor] = None,
+    antithetic: bool = False,
+) -> torch.Tensor:
+    """
+    Layer 4 (SABR scheme): Simulate S*_T for the Markovian case H = 1/2.
+
+    When H = 1/2, the Volterra kernel is constant (ζ(t) = κ) and the
+    fractional Brownian motion degenerates to standard Brownian motion.
+    The variance process becomes a geometric Brownian motion:
+
+        V_t = v(t) · exp(η · W⁰_t − η²t/2)
+
+    where κ = η√(2H) = η at H = 1/2.  No Cholesky factorisation or
+    BLP decomposition is needed — just cumulative sums of i.i.d. normals.
+
+    Args:
+        S0, v0, eta, rho_eff: effective parameters from Layer 3
+        T:          float — swaption expiry
+        M:          int — number of time steps
+        N_paths:    int — number of MC paths
+        v_curve:    Optional shape (M,) — v(t_i)/v(0) ratio
+        antithetic: bool — if True, use antithetic variates
+
+    Returns:
+        S_T: shape (N_paths,) — terminal swap rate values
+    """
+    h = T / M
+    device = S0.device
+    sqrt_h = np.sqrt(h)
+    sqrt_rho = torch.sqrt(1.0 - rho_eff**2)
+    eta_sq = eta ** 2
+
+    # Draw standard normals
+    if antithetic:
+        N_half = N_paths // 2
+        dW0_half = torch.randn(N_half, M, dtype=torch.float64, device=device) * sqrt_h
+        dWperp_half = torch.randn(N_half, M, dtype=torch.float64, device=device) * sqrt_h
+        dW0 = torch.cat([dW0_half, -dW0_half], dim=0)
+        dWperp = torch.cat([dWperp_half, -dWperp_half], dim=0)
+    else:
+        dW0 = torch.randn(N_paths, M, dtype=torch.float64, device=device) * sqrt_h
+        dWperp = torch.randn(N_paths, M, dtype=torch.float64, device=device) * sqrt_h
+
+    # Cumulative W⁰: shape (N_paths, M)
+    W0_cumulative = torch.cumsum(dW0, dim=1)
+
+    # Initialise
+    log_S = torch.log(S0) * torch.ones(N_paths, dtype=torch.float64, device=device)
+    V_current = v0 * torch.ones(N_paths, dtype=torch.float64, device=device)
+
+    for i in range(M):
+        t_next = (i + 1) * h
+
+        # --- Step 1: Price update using LEFT-endpoint variance ---
+        brownian_incr = rho_eff * dW0[:, i] + sqrt_rho * dWperp[:, i]
+        log_S = log_S - 0.5 * V_current * h + torch.sqrt(V_current) * brownian_incr
+
+        # --- Step 2: Variance at next time step ---
+        # V_{t_{i+1}} = v0 · exp(η · W⁰_{t_{i+1}} − η²/2 · t_{i+1})
+        correction = eta_sq / 2.0 * t_next
+        V_next = v0 * torch.exp(eta * W0_cumulative[:, i] - correction)
+
+        if v_curve is not None:
+            V_next = V_next * v_curve[i]
+
+        V_next = torch.clamp(V_next, min=0.0)
+        V_current = V_next
+
+    return torch.exp(log_S)
+
+
 def simulate_swaption(
     params: "MappedRoughSABRParams",
     swn: "SwaptionData",
@@ -897,6 +979,13 @@ def simulate_swaption(
             T=T, M=M, N_paths=N_paths,
             v_curve=v_curve, kappa=hybrid_kappa,
             antithetic=antithetic,
+        )
+    elif scheme == "sabr":
+        S_T = simulate_sabr(
+            S0=swn.S0, v0=eff["v0"], eta=p["eta"],
+            rho_eff=eff["rho_eff"],
+            T=T, M=M, N_paths=N_paths,
+            v_curve=v_curve, antithetic=antithetic,
         )
     else:
         S_T = simulate_approx(
