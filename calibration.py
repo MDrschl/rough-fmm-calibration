@@ -37,9 +37,9 @@ CONFIG = {
     "device": "cpu",
 
     # --- Calibration mode ---
-    #   "hybrid"            — Mode A: single-stage BLP, H differentiable
-    #   "hybrid_two_stage"  — Mode C: two-stage BLP both stages, H frozen in S2
-    #   "two_stage"         — Mode B: legacy, approx S1 → exact Cholesky S2
+    #   "hybrid"            — Mode A: single-stage hybrid, H differentiable
+    #   "hybrid_two_stage"  — Mode C: two-stage hybrid both stages, H frozen in S2
+    #   "two_stage"         — Mode B: approx S1 → exact Cholesky S2
     #   "hybrid_exact"      — Mode G: hybrid S1 → exact Cholesky S2
     #   "adachi"            — Mode D: Adachi-style, 1Y smiles → ρ_{ij} from ATM
     #   "roughness"         — Mode E: ablation study, H free vs H = 0.5
