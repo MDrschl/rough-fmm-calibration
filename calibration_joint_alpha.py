@@ -1,3 +1,21 @@
+"""calibration_joint_alpha.py
+Joint-alpha calibration variant.
+
+Differs from calibration.py in one respect: the variance levels α_j are
+warm-started by formula-based ATM matching at initialisation and then
+updated jointly with all other parameters by gradient descent throughout.
+No out-of-graph MC-based Brent re-matching is performed at stage
+boundaries or post-calibration.  _rematch_alpha is retained in the
+codebase for reference but is not called by any mode function.
+
+Rationale: the vega-weighted loss is approximately quadratic in α_j near
+ATM, giving a strong gradient signal that self-corrects any initialisation
+error.  The Jensen gap (which motivates the MC Brent step in calibration.py)
+is corrected implicitly by gradient descent once η is calibrated.  The
+trade-off is that intermediate diagnostics at stage boundaries no longer
+guarantee ATM accuracy, and OOS α is re-initialised via the formula proxy
+rather than a full MC root-find.
+"""
 import sys
 import os
 import time
@@ -37,14 +55,14 @@ CONFIG = {
     "device": "cpu",
 
     # --- Calibration mode ---
-    #   "hybrid"            — Mode A: single-stage hybrid, H differentiable
-    #   "hybrid_two_stage"  — Mode C: two-stage hybrid both stages, H frozen in S2
-    #   "two_stage"         — Mode B: approx S1 → exact Cholesky S2
+    #   "hybrid"            — Mode A: single-stage BLP, H differentiable
+    #   "hybrid_two_stage"  — Mode C: two-stage BLP both stages, H frozen in S2
+    #   "two_stage"         — Mode B: legacy, approx S1 → exact Cholesky S2
     #   "hybrid_exact"      — Mode G: hybrid S1 → exact Cholesky S2
     #   "adachi"            — Mode D: Adachi-style, 1Y smiles → ρ_{ij} from ATM
     #   "roughness"         — Mode E: ablation study, H free vs H = 0.5
     #   "cross"             — Mode F: train/test split cross-validation
-    "mode": "hybrid_two_stage",
+    "mode": "hybrid",
 
     "hybrid": {
         "iterations": 800,
@@ -514,35 +532,41 @@ def _run_hybrid_stage(params, mkt, cfg, scfg, *,
 
 
 def run_mode_hybrid(params, mkt, cfg):
-    """Single-stage hybrid calibration."""
+    """Single-stage hybrid calibration.
+    α is warm-started by formula-based ATM matching at initialisation
+    and updated jointly by gradient descent throughout — no out-of-graph
+    Brent re-matching is performed.
+    """
     hcfg = cfg["hybrid"]
+    params.alpha_tilde.requires_grad_(True)
     result = _run_hybrid_stage(
         params, mkt, cfg, hcfg,
         freeze_H=False, label="HYBRID")
-
-    _rematch_alpha(params, mkt, cfg,
-                   label="Post-calibration α re-matching (MC-based Brent)")
 
     return {"history": result["history"]}
 
 
 def run_mode_hybrid_two_stage(params, mkt, cfg):
-    """Hybrid two-stage calibration (recommended)."""
+    """Hybrid two-stage calibration (recommended).
+    α is warm-started by formula-based ATM matching at initialisation.
+    In Stage 1 α is updated jointly with H, η, ρ₀, ρ by gradient descent.
+    At the stage boundary α is re-enabled (it may have been frozen in
+    some sub-modes) and remains in the graph throughout Stage 2.
+    No out-of-graph Brent re-matching is performed at any stage boundary.
+    """
     h2cfg = cfg["hybrid_two_stage"]
 
+    params.alpha_tilde.requires_grad_(True)
     stage1_result = _run_hybrid_stage(
         params, mkt, cfg, h2cfg["stage1"],
         freeze_H=False, crn_offset=0, label="STAGE 1")
 
-    _rematch_alpha(params, mkt, cfg, N_paths=50_000, M=h2cfg["stage2"]["M"],
-                   label="Inter-stage α re-matching (MC-based Brent)")
+    # Ensure α remains in graph for Stage 2 (freeze_H will fix H only)
+    params.alpha_tilde.requires_grad_(True)
 
     stage2_result = _run_hybrid_stage(
         params, mkt, cfg, h2cfg["stage2"],
         freeze_H=True, crn_offset=10000, label="STAGE 2")
-
-    _rematch_alpha(params, mkt, cfg,
-                   label="Post-calibration α re-matching (MC-based Brent)")
 
     return {
         "stage1": stage1_result,
@@ -558,12 +582,12 @@ def run_mode_hybrid_exact(params, mkt, cfg):
     """
     gecfg = cfg["hybrid_exact"]
 
+    params.alpha_tilde.requires_grad_(True)
     stage1_result = _run_hybrid_stage(
         params, mkt, cfg, gecfg["stage1"],
         freeze_H=False, crn_offset=0, label="STAGE 1 (hybrid)")
 
-    _rematch_alpha(params, mkt, cfg, N_paths=50_000, M=gecfg["stage2"]["M"],
-                   label="Inter-stage α re-matching (MC-based Brent)")
+    # α remains in graph for Stage 2
 
     s2cfg = gecfg["stage2"]
     with torch.no_grad():
@@ -604,9 +628,6 @@ def run_mode_hybrid_exact(params, mkt, cfg):
         kappa_val = eta_val * np.sqrt(2.0 * H_val)
     print(f"\nStage 2 complete. H = {H_val:.4f}, "
           f"η = {eta_val:.4f}, κ = {kappa_val:.4f}")
-
-    _rematch_alpha(params, mkt, cfg,
-                   label="Post-calibration α re-matching (MC-based Brent)")
 
     return {
         "stage1": stage1_result,
@@ -716,10 +737,10 @@ def run_mode_adachi(params, mkt, cfg):
     print(f"\nStage 1 complete. H = {H_val:.4f}, "
           f"η = {eta_val:.4f}, κ = {kappa_val:.4f}")
 
-    _rematch_alpha(params, mkt, cfg,
-                   label="Inter-stage α re-matching (MC-based Brent)")
-
-    # Stage 2: Co-terminal ATM swaptions → ρ_{ij}
+    # Stage 2: Co-terminal ATM swaptions → ρ_{ij} only; α frozen here
+    # since its gradient from multi-rate ATM swaptions is weak relative
+    # to ρ_{ij}, and joint optimisation in Stage 2 would conflate ATM
+    # level corrections with correlation fitting.
     print(f"\n{'=' * 60}")
     print("STAGE 2 (Adachi): Multi-rate ATM swaptions — only ω (ρ_{ij}) free")
     print("=" * 60)
@@ -772,9 +793,6 @@ def run_mode_adachi(params, mkt, cfg):
         print(f"  ρ diag check: {torch.diag(p['rho']).numpy()}")
         print(f"  ρ₀ = [{', '.join(f'{r:.3f}' for r in p['rho0'].numpy())}]")
 
-    _rematch_alpha(params, mkt, cfg,
-                   label="Post-calibration α re-matching (MC-based Brent)")
-
     return {
         "stage1": stage1_result,
         "stage2": stage2_result,
@@ -810,20 +828,16 @@ def run_mode_cross(params, mkt, cfg):
         print(f"    {k[0]:.0f}Y×{k[1]:.0f}Y")
 
     s1cfg = {**ccfg["stage1"], "keys": train_keys}
+    params.alpha_tilde.requires_grad_(True)
     stage1_result = _run_hybrid_stage(
         params, mkt, cfg, s1cfg,
         freeze_H=False, crn_offset=0, label="STAGE 1 (train)")
 
-    _rematch_alpha(params, mkt, cfg, N_paths=50_000, M=ccfg["stage2"]["M"],
-                   label="Inter-stage α re-matching (MC-based Brent)")
-
+    params.alpha_tilde.requires_grad_(True)
     s2cfg = {**ccfg["stage2"], "keys": train_keys}
     stage2_result = _run_hybrid_stage(
         params, mkt, cfg, s2cfg,
         freeze_H=True, crn_offset=10000, label="STAGE 2 (train)")
-
-    _rematch_alpha(params, mkt, cfg,
-                   label="Post-calibration α re-matching (MC-based Brent)")
 
     return {
         "stage1": stage1_result,
@@ -1160,8 +1174,32 @@ def run_oos_evaluation(params, mkt_oos, cfg, diag_scheme, diag_kappa,
     print_market_summary(mkt_oos)
 
     params_oos = copy.deepcopy(params)
-    _rematch_alpha(params_oos, mkt_oos, cfg,
-                   label="Re-matching α to out-of-sample ATM levels (MC-based)")
+
+    # Re-initialise α to new date's ATM levels via formula-based matching
+    # (H and η fixed at in-sample calibrated values).  No MC Brent is used
+    # here; the Jensen gap is accepted at OOS evaluation since a full MC
+    # root-find outside the graph would be inconsistent with the joint-α
+    # philosophy.  For a stricter OOS match, replace with _rematch_alpha.
+    print("\n--- Re-initialising α to OOS ATM levels (formula-based) ---")
+    with torch.no_grad():
+        p = params_oos()
+        smile_keys_1y = sorted([k for k in mkt_oos.swaptions.keys()
+                                 if k[1] == 1])
+        alpha_new = match_all_alphas(
+            mkt_oos, p["H"], p["eta"], p["rho0"], p["rho"],
+            alpha_init=p["alpha"],
+            smile_keys=smile_keys_1y,
+            variance_curve_mode="simplified",
+            method="formula",
+        )
+        matched_indices = [mkt_oos.swaptions[k].I
+                           for k in smile_keys_1y
+                           if mkt_oos.swaptions[k].J - mkt_oos.swaptions[k].I == 1]
+        alpha_final = _interpolate_alpha(alpha_new, matched_indices)
+        for j in range(mkt_oos.N):
+            params_oos.alpha_tilde.data[j] = _softplus_inv(alpha_final[j].item())
+        p_new = params_oos()
+        print(f"  α = [{', '.join(f'{a:.4f}' for a in p_new['alpha'].numpy())}]")
 
     print(f"\n--- Out-of-sample MC report ({cfg['out_sample_date']}) ---")
     report_oos = mc_diagnostics(
