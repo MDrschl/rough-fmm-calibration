@@ -222,11 +222,11 @@ class MappedRoughSABRParams(nn.Module):
         self._device = device
 
         self.H_tilde = nn.Parameter(
-            torch.tensor(-0.405, dtype=torch.float64, device=device)
+            torch.tensor(-1.386294, dtype=torch.float64, device=device)
         )
 
         self.eta_tilde = nn.Parameter(
-            torch.tensor(2.194, dtype=torch.float64, device=device)
+            torch.tensor(1.854587, dtype=torch.float64, device=device)
         )
 
         self.alpha_tilde = nn.Parameter(

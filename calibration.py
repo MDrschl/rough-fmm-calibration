@@ -44,14 +44,14 @@ CONFIG = {
     #   "adachi"            — Mode D: Adachi-style, 1Y smiles → ρ_{ij} from ATM
     #   "roughness"         — Mode E: ablation study, H free vs H = 0.5
     #   "cross"             — Mode F: train/test split cross-validation
-    "mode": "hybrid_two_stage",
+    "mode": "hybrid",
 
     "hybrid": {
         "iterations": 800,
         "lr": 3e-3,
         "N_paths": 30_000,
         "M": 100,
-        "kappa": 3,
+        "kappa": 2,
         "variance_mode": "full",
         "keys": None,
         "scheduler": "cosine",
@@ -68,7 +68,7 @@ CONFIG = {
             "lr": 5e-3,
             "N_paths": 20_000,
             "M": 50,
-            "kappa": 3,
+            "kappa": 2,
             "variance_mode": "simplified",
             "keys": None,
             "scheduler": "cosine",
@@ -82,7 +82,7 @@ CONFIG = {
             "lr": 1e-3,
             "N_paths": 30_000,
             "M": 100,
-            "kappa": 3,
+            "kappa": 2,
             "variance_mode": "full",
             "keys": None,
             "scheduler": "cosine",
@@ -98,7 +98,7 @@ CONFIG = {
             "lr": 5e-3,
             "N_paths": 20_000,
             "M": 50,
-            "kappa": 3,
+            "kappa": 2,
             "variance_mode": "simplified",
             "keys": None,
             "scheduler": "cosine",
@@ -148,7 +148,7 @@ CONFIG = {
             "lr": 3e-3,
             "N_paths": 30_000,
             "M": 100,
-            "kappa": 3,
+            "kappa": 2,
             "variance_mode": "full",
             "scheduler": "cosine",
             "warmup_steps": 30,
@@ -161,7 +161,7 @@ CONFIG = {
             "lr": 1e-3,
             "N_paths": 30_000,
             "M": 100,
-            "kappa": 3,
+            "kappa": 2,
             "variance_mode": "full",
             "scheduler": "cosine",
             "warmup_steps": 20,
@@ -182,7 +182,7 @@ CONFIG = {
             "lr": 5e-3,
             "N_paths": 20_000,
             "M": 50,
-            "kappa": 3,
+            "kappa": 2,
             "variance_mode": "simplified",
             "keys": None,
             "scheduler": "cosine",
@@ -196,7 +196,7 @@ CONFIG = {
             "lr": 1e-3,
             "N_paths": 30_000,
             "M": 100,
-            "kappa": 3,
+            "kappa": 2,
             "variance_mode": "full",
             "keys": None,
             "scheduler": "cosine",
@@ -232,7 +232,7 @@ CONFIG = {
     "diag_N_paths": 100_000,
     "diag_M": 100,
     "diag_scheme": "auto",
-    "diag_hybrid_kappa": 3,
+    "diag_hybrid_kappa": 2,
 }
 
 
@@ -325,7 +325,7 @@ def _resolve_diag_scheme(cfg):
 # Initialisation
 # =============================================================================
 
-def initialise_params(mkt, H_init=0.30, eta_init=1.6):
+def initialise_params(mkt, H_init=0.10, eta_init=2.0):
     """Create parameter module and warm-start all α via formula-based ATM matching."""
     params = MappedRoughSABRParams(N=mkt.N, device=mkt.device)
     params.set_H(H_init)
@@ -406,7 +406,7 @@ def initialise_params(mkt, H_init=0.30, eta_init=1.6):
     return params
 
 
-def initialise_fixed_H(mkt, H_val, eta_init=1.6):
+def initialise_fixed_H(mkt, H_val, eta_init=2.0):
     """Create parameter module with H fixed at a given value."""
     params = MappedRoughSABRParams(N=mkt.N, device=mkt.device)
     params.set_H(H_val)
@@ -447,7 +447,7 @@ def initialise_fixed_H(mkt, H_val, eta_init=1.6):
     return params
 
 
-def initialise_h05(mkt, eta_init=1.6):
+def initialise_h05(mkt, eta_init=2.0):
     """Create parameter module with H fixed at 0.5 (Markovian SABR)."""
     return initialise_fixed_H(mkt, 0.5, eta_init=eta_init)
 
@@ -1522,7 +1522,7 @@ def save_smile_plots(params, mkt, config, filename="amcc_smile_fits.png",
             "hybrid", "hybrid_two_stage", "adachi", "cross") else "exact"
     else:
         diag_scheme = raw_scheme
-    diag_kappa = config.get("diag_hybrid_kappa", 3)
+    diag_kappa = config.get("diag_hybrid_kappa", 2)
 
     with torch.no_grad():
         for row_idx, mat in enumerate(maturities):
@@ -1585,7 +1585,7 @@ def save_comparison_plots(params_rough, params_h05, mkt, cfg):
         return
 
     diag_scheme = cfg.get("diag_scheme", "exact")
-    diag_kappa = cfg.get("diag_hybrid_kappa", 3)
+    diag_kappa = cfg.get("diag_hybrid_kappa", 2)
     if diag_scheme == "auto":
         diag_scheme = "hybrid"
 
@@ -1950,7 +1950,7 @@ if __name__ == "__main__":
         fixed_models = rr["fixed_models"]
 
         diag_scheme = _resolve_diag_scheme(cfg)
-        diag_kappa = cfg.get("diag_hybrid_kappa", 3)
+        diag_kappa = cfg.get("diag_hybrid_kappa", 2)
 
         report_rough = mc_diagnostics(
             params_rough, mkt, label="Rough (H free)",
@@ -2099,7 +2099,7 @@ if __name__ == "__main__":
         print("# INITIALISATION")
         print("#" * 60)
 
-        params = initialise_params(mkt, H_init=0.30, eta_init=1.6)
+        params = initialise_params(mkt, H_init=0.10, eta_init=2.0)
 
         print("\n" + "#" * 60)
         print("# AMCC CALIBRATION (train set only)")
@@ -2115,7 +2115,7 @@ if __name__ == "__main__":
         print_calibrated_params(params, mkt)
 
         diag_scheme = _resolve_diag_scheme(cfg)
-        diag_kappa = cfg.get("diag_hybrid_kappa", 3)
+        diag_kappa = cfg.get("diag_hybrid_kappa", 2)
 
         run_cross_diagnostics(
             params, mkt, cfg, diag_scheme, diag_kappa,
@@ -2167,7 +2167,7 @@ if __name__ == "__main__":
         print("# INITIALISATION")
         print("#" * 60)
 
-        params = initialise_params(mkt, H_init=0.30, eta_init=1.6)
+        params = initialise_params(mkt, H_init=0.10, eta_init=2.0)
 
         print("\n" + "#" * 60)
         print("# AMCC CALIBRATION")
@@ -2192,7 +2192,7 @@ if __name__ == "__main__":
         print_calibrated_params(params, mkt)
 
         diag_scheme = _resolve_diag_scheme(cfg)
-        diag_kappa = cfg.get("diag_hybrid_kappa", 3)
+        diag_kappa = cfg.get("diag_hybrid_kappa", 2)
 
         report_in, representative_keys = run_in_sample_diagnostics(
             params, mkt, cfg, diag_scheme, diag_kappa)
