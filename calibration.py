@@ -8,7 +8,6 @@ import torch
 from main import (
     MappedRoughSABRParams,
     load_market_data,
-    match_all_alphas,
     calibrate,
     calibrate_two_stage,
     print_market_summary,
@@ -44,7 +43,7 @@ CONFIG = {
     #   "adachi"            — Mode D: Adachi-style, 1Y smiles → ρ_{ij} from ATM
     #   "roughness"         — Mode E: ablation study, H free vs H = 0.5
     #   "cross"             — Mode F: train/test split cross-validation
-    "mode": "hybrid_two_stage",
+    "mode": "adachi",
 
     "hybrid": {
         "iterations": 800,
@@ -158,13 +157,14 @@ CONFIG = {
         },
         "stage2": {
             "iterations": 400,
+            "min_iterations_per_row": 80,
             "lr": 1e-3,
             "N_paths": 30_000,
             "M": 100,
             "kappa": 2,
             "variance_mode": "full",
             "scheduler": "cosine",
-            "warmup_steps": 20,
+            "warmup_steps": 10,
             "cosine_power": 0.5,
             "grad_clip_norm": 1.0,
         },
@@ -228,6 +228,21 @@ CONFIG = {
     "early_stop_tol": 1e-4,
     "crn_seed": 42,
 
+    # --- OOS α fine-tuning ---
+    # After formula-based warm-start, run a short gradient pass with only
+    # α free to correct the Jensen gap and multi-rate interpolation error.
+    # H, η, ρ₀, ρ_{ij} remain frozen — only the ATM level is re-anchored.
+    "oos_alpha_finetune": {
+        "iterations": 80,
+        "lr": 5e-3,
+        "N_paths": 20_000,
+        "M": 50,
+        "kappa": 2,
+        "scheduler": "cosine",
+        "warmup_steps": 10,
+        "cosine_power": 0.5,
+    },
+
     # --- Diagnostics ---
     "diag_N_paths": 100_000,
     "diag_M": 100,
@@ -269,45 +284,6 @@ def _interpolate_alpha(alpha, matched_indices):
     return alpha
 
 
-def _rematch_alpha(params, mkt, cfg, N_paths=None, M=None, label=""):
-    """MC-based Brent α re-matching to ATM levels. Modifies params in-place."""
-    N_paths = N_paths or cfg["diag_N_paths"]
-    M = M or cfg["diag_M"]
-
-    if label:
-        print(f"\n--- {label} ---")
-
-    with torch.no_grad():
-        p = params()
-        smile_keys = sorted([k for k in mkt.swaptions.keys() if k[1] == 1])
-        alpha_rematched = match_all_alphas(
-            mkt, p["H"], p["eta"], p["rho0"], p["rho"],
-            alpha_init=p["alpha"],
-            smile_keys=smile_keys,
-            variance_curve_mode="full",
-            method="mc",
-            N_paths=N_paths,
-            M=M,
-            seed=cfg["crn_seed"],
-        )
-
-        matched_indices = []
-        for key in smile_keys:
-            swn = mkt.swaptions[key]
-            if swn.J - swn.I == 1:
-                matched_indices.append(swn.I)
-
-        if matched_indices:
-            alpha_rematched = _interpolate_alpha(
-                alpha_rematched, matched_indices)
-
-        for j in range(mkt.N):
-            a = alpha_rematched[j].item()
-            params.alpha_tilde.data[j] = _softplus_inv(a)
-
-        p_new = params()
-        print(f"  α = [{', '.join(f'{a:.4f}' for a in p_new['alpha'].numpy())}]")
-
 
 def _resolve_diag_scheme(cfg):
     """Resolve diag_scheme='auto' based on calibration mode."""
@@ -325,6 +301,58 @@ def _resolve_diag_scheme(cfg):
 # Initialisation
 # =============================================================================
 
+def _formula_alpha_warmstart(params, mkt, H, eta):
+    """Warm-start α from 1Y-tenor ATM IVs via the simplified variance formula.
+
+    For a single-rate swaption (I, I+1) with expiry T:
+        σ_ATM ≈ α_I · π_I · √G,   G = ∫₀¹ exp(η² (Ts)^{2H} / 4) ds
+    so  α_I = σ_ATM / (π_I · √G).
+
+    Rates not anchored by a 1Y-tenor swaption are filled by linear
+    interpolation with flat extrapolation.
+    """
+    with torch.no_grad():
+        p = params()
+        alpha = p["alpha"].clone()
+
+        # Compute G via Gauss–Legendre quadrature
+        n_quad = 50
+        nodes_np, weights_np = np.polynomial.legendre.leggauss(n_quad)
+        s = torch.tensor(0.5 * (nodes_np + 1.0), dtype=torch.float64)
+        w = torch.tensor(0.5 * weights_np, dtype=torch.float64)
+
+        smile_keys_1y = sorted([k for k in mkt.swaptions.keys() if k[1] == 1])
+        matched_indices = []
+
+        for key in smile_keys_1y:
+            swn = mkt.swaptions[key]
+            I, J = swn.I, swn.J
+            if J - I != 1:
+                continue
+
+            T = swn.expiry_years
+            two_H = 2.0 * H
+            G = (w * torch.exp(eta**2 * (T * s)**two_H / 4.0)).sum()
+
+            atm_mask = (swn.strikes - swn.S0).abs() < 1e-6
+            if atm_mask.sum() > 0:
+                sigma_atm = swn.ivs_black[atm_mask][0]
+            else:
+                sigma_atm = swn.ivs_black[swn.n_strikes // 2]
+
+            pi_j = swn.pi[0]
+            alpha[I] = torch.clamp(sigma_atm / (pi_j * torch.sqrt(G) + 1e-30),
+                                   min=1e-6)
+            matched_indices.append(I)
+
+        alpha = _interpolate_alpha(alpha, matched_indices)
+
+        for j in range(mkt.N):
+            params.alpha_tilde.data[j] = _softplus_inv(alpha[j].item())
+
+    return matched_indices, alpha
+
+
 def initialise_params(mkt, H_init=0.10, eta_init=2.0):
     """Create parameter module and warm-start all α via formula-based ATM matching."""
     params = MappedRoughSABRParams(N=mkt.N, device=mkt.device)
@@ -333,29 +361,14 @@ def initialise_params(mkt, H_init=0.10, eta_init=2.0):
 
     with torch.no_grad():
         p = params()
-
-        smile_keys_1y = sorted([k for k in mkt.swaptions.keys() if k[1] == 1])
-        alpha_matched = match_all_alphas(
-            mkt, p["H"], p["eta"], p["rho0"], p["rho"],
-            alpha_init=p["alpha"],
-            smile_keys=smile_keys_1y,
-            variance_curve_mode="simplified",
-            method="formula",
-        )
-
-        matched_indices = []
-        for key in smile_keys_1y:
-            swn = mkt.swaptions[key]
-            if swn.J - swn.I == 1:
-                matched_indices.append(swn.I)
+        matched_indices, alpha_final = _formula_alpha_warmstart(
+            params, mkt, p["H"], p["eta"])
 
         print(f"\n  Pass 1 — 1Y-tenor ATM matching:")
         print(f"    Matched rate indices (0-based): {matched_indices}")
         print(f"    α at matched: "
-              + ", ".join(f"α[{i}]={alpha_matched[i].item():.4f}"
+              + ", ".join(f"α[{i}]={alpha_final[i].item():.4f}"
                           for i in matched_indices))
-
-        alpha_final = _interpolate_alpha(alpha_matched, matched_indices)
 
         unmatched = [j for j in range(mkt.N) if j not in matched_indices]
         print(f"  Pass 2 — interpolation for unmatched indices: {unmatched}")
@@ -363,10 +376,6 @@ def initialise_params(mkt, H_init=0.10, eta_init=2.0):
               + ", ".join(f"α[{j}]={alpha_final[j].item():.4f}"
                           for j in unmatched))
         print(f"    α final: [{', '.join(f'{a:.4f}' for a in alpha_final.numpy())}]")
-
-        for j in range(mkt.N):
-            a = alpha_final[j].item()
-            params.alpha_tilde.data[j] = _softplus_inv(a)
 
     with torch.no_grad():
         p = params()
@@ -415,27 +424,7 @@ def initialise_fixed_H(mkt, H_val, eta_init=2.0):
 
     with torch.no_grad():
         p = params()
-
-        smile_keys_1y = sorted([k for k in mkt.swaptions.keys() if k[1] == 1])
-        alpha_matched = match_all_alphas(
-            mkt, p["H"], p["eta"], p["rho0"], p["rho"],
-            alpha_init=p["alpha"],
-            smile_keys=smile_keys_1y,
-            variance_curve_mode="simplified",
-            method="formula",
-        )
-
-        matched_indices = []
-        for key in smile_keys_1y:
-            swn = mkt.swaptions[key]
-            if swn.J - swn.I == 1:
-                matched_indices.append(swn.I)
-
-        alpha_final = _interpolate_alpha(alpha_matched, matched_indices)
-
-        for j in range(mkt.N):
-            a = alpha_final[j].item()
-            params.alpha_tilde.data[j] = _softplus_inv(a)
+        _formula_alpha_warmstart(params, mkt, p["H"], p["eta"])
 
     with torch.no_grad():
         p = params()
@@ -514,35 +503,38 @@ def _run_hybrid_stage(params, mkt, cfg, scfg, *,
 
 
 def run_mode_hybrid(params, mkt, cfg):
-    """Single-stage hybrid calibration."""
+    """Single-stage hybrid calibration.
+    α is warm-started by formula-based ATM matching at initialisation
+    and updated jointly by gradient descent throughout.
+    """
     hcfg = cfg["hybrid"]
+    params.alpha_tilde.requires_grad_(True)
     result = _run_hybrid_stage(
         params, mkt, cfg, hcfg,
         freeze_H=False, label="HYBRID")
-
-    _rematch_alpha(params, mkt, cfg,
-                   label="Post-calibration α re-matching (MC-based Brent)")
 
     return {"history": result["history"]}
 
 
 def run_mode_hybrid_two_stage(params, mkt, cfg):
-    """Hybrid two-stage calibration (recommended)."""
+    """Hybrid two-stage calibration (recommended).
+    α is warm-started by formula-based ATM matching at initialisation.
+    In Stage 1 α is updated jointly with H, η, ρ₀, ρ by gradient descent.
+    At the stage boundary α remains in the graph throughout Stage 2.
+    """
     h2cfg = cfg["hybrid_two_stage"]
 
+    params.alpha_tilde.requires_grad_(True)
     stage1_result = _run_hybrid_stage(
         params, mkt, cfg, h2cfg["stage1"],
         freeze_H=False, crn_offset=0, label="STAGE 1")
 
-    _rematch_alpha(params, mkt, cfg, N_paths=50_000, M=h2cfg["stage2"]["M"],
-                   label="Inter-stage α re-matching (MC-based Brent)")
+    # Ensure α remains in graph for Stage 2 (freeze_H will fix H only)
+    params.alpha_tilde.requires_grad_(True)
 
     stage2_result = _run_hybrid_stage(
         params, mkt, cfg, h2cfg["stage2"],
         freeze_H=True, crn_offset=10000, label="STAGE 2")
-
-    _rematch_alpha(params, mkt, cfg,
-                   label="Post-calibration α re-matching (MC-based Brent)")
 
     return {
         "stage1": stage1_result,
@@ -558,12 +550,12 @@ def run_mode_hybrid_exact(params, mkt, cfg):
     """
     gecfg = cfg["hybrid_exact"]
 
+    params.alpha_tilde.requires_grad_(True)
     stage1_result = _run_hybrid_stage(
         params, mkt, cfg, gecfg["stage1"],
         freeze_H=False, crn_offset=0, label="STAGE 1 (hybrid)")
 
-    _rematch_alpha(params, mkt, cfg, N_paths=50_000, M=gecfg["stage2"]["M"],
-                   label="Inter-stage α re-matching (MC-based Brent)")
+    # α remains in graph for Stage 2
 
     s2cfg = gecfg["stage2"]
     with torch.no_grad():
@@ -604,9 +596,6 @@ def run_mode_hybrid_exact(params, mkt, cfg):
         kappa_val = eta_val * np.sqrt(2.0 * H_val)
     print(f"\nStage 2 complete. H = {H_val:.4f}, "
           f"η = {eta_val:.4f}, κ = {kappa_val:.4f}")
-
-    _rematch_alpha(params, mkt, cfg,
-                   label="Post-calibration α re-matching (MC-based Brent)")
 
     return {
         "stage1": stage1_result,
@@ -652,9 +641,12 @@ def run_mode_adachi(params, mkt, cfg):
     Stage 1: Calibrate H, η, α, ρ₀ from 1Y-tenor smiles (single-rate
              swaptions where ρ_{ij} is irrelevant). Inter-rate correlations
              ρ are frozen via gradient hook.
-    Stage 2: Calibrate ρ_{ij} (ω angles) from co-terminal ATM swaptions
-             (multi-rate, where ρ_{ij} governs the ATM level). All other
-             parameters frozen; ρ₀ frozen via gradient hook.
+    Stage 2: Calibrate ρ_{ij} incrementally by co-terminal set, following
+             the strategy of Adachi et al. (2025, §6.2). For each
+             co-terminal index J = 3, 4, ..., N, only row J of the
+             Rapisarda Cholesky factor B is optimised, using ATM-only
+             multi-rate swaptions with max rate index = J. H, η, α, ρ₀
+             are all frozen throughout Stage 2.
     """
     dcfg = cfg["adachi"]
     s1cfg = dcfg["stage1"]
@@ -716,51 +708,115 @@ def run_mode_adachi(params, mkt, cfg):
     print(f"\nStage 1 complete. H = {H_val:.4f}, "
           f"η = {eta_val:.4f}, κ = {kappa_val:.4f}")
 
-    _rematch_alpha(params, mkt, cfg,
-                   label="Inter-stage α re-matching (MC-based Brent)")
+    # Stage 2: Incremental co-terminal correlation fitting
+    #
+    # For each co-terminal index J (the max rate index in a swaption),
+    # we collect all multi-rate swaptions whose underlying rates end at J,
+    # i.e. swaptions (I, J) with J - I > 1 and I + tenor = J.
+    # We then optimise only row J of the Rapisarda Cholesky factor B
+    # (= omega_tilde[J, 1:J]) on ATM prices of those swaptions.
+    # Rows < J are already calibrated from previous iterations.
+    # Column 0 (ρ₀) is always frozen — it was set in Stage 1.
 
-    # Stage 2: Co-terminal ATM swaptions → ρ_{ij}
     print(f"\n{'=' * 60}")
-    print("STAGE 2 (Adachi): Multi-rate ATM swaptions — only ω (ρ_{ij}) free")
+    print("STAGE 2 (Adachi): Incremental co-terminal ρ_{ij} fitting")
     print("=" * 60)
-    print(f"  {s2cfg['iterations']} iterations, {s2cfg['N_paths']:,} paths, "
-          f"{s2cfg['M']} steps, lr={s2cfg['lr']}")
 
     params.fix_H()
     params.alpha_tilde.requires_grad_(False)
     params.eta_tilde.requires_grad_(False)
 
-    rho0_hook = params.register_freeze_rho0_hook()
-
     gc2 = s2cfg.get("grad_clip_norm", 10.0)
 
-    stage2_result = calibrate(
-        params, mkt,
-        n_iterations=s2cfg["iterations"],
-        lr=s2cfg["lr"],
-        N_paths=s2cfg["N_paths"],
-        M=s2cfg["M"],
-        scheme="hybrid",
-        hybrid_kappa=s2cfg["kappa"],
-        variance_curve_mode=s2cfg["variance_mode"],
-        use_crn=True,
-        crn_seed=cfg["crn_seed"] + 10000,
-        log_every=20,
-        swaption_keys=keys_multi,
-        scheduler_type=s2cfg.get("scheduler", "cosine"),
-        warmup_steps=s2cfg.get("warmup_steps", 20),
-        cosine_power=s2cfg.get("cosine_power", 0.5),
-        early_stop_patience=cfg.get("early_stop_patience", 150),
-        early_stop_tol=cfg.get("early_stop_tol", 1e-4),
-        grad_clip_norm=gc2,
-        atm_only=True,
-    )
+    # Group multi-rate swaptions by co-terminal index J = expiry + tenor
+    from collections import defaultdict
+    coterminal_groups = defaultdict(list)
+    for key in keys_multi:
+        exp, ten = key
+        J = int(exp + ten)
+        coterminal_groups[J].append(key)
 
-    rho0_hook.remove()
+    # Also include all multi-rate swaptions with J' < J as context,
+    # since their prices depend on already-fitted rows and provide
+    # regularisation. But only the new row's angles have gradients.
+    stage2_histories = {}
 
-    if stage2_result["best_state"] is not None:
-        params.load_state_dict(stage2_result["best_state"])
+    for J_target in sorted(coterminal_groups.keys()):
+        ct_keys = coterminal_groups[J_target]
 
+        # Collect all multi-rate swaptions with max rate index <= J_target
+        # (current + all previously fitted co-terminal sets)
+        all_keys_up_to_J = []
+        for J_prev in sorted(coterminal_groups.keys()):
+            if J_prev <= J_target:
+                all_keys_up_to_J.extend(coterminal_groups[J_prev])
+
+        print(f"\n  --- Co-terminal J={J_target}: "
+              f"fitting row {J_target} of B ---")
+        print(f"      New swaptions: {ct_keys}")
+        print(f"      All swaptions (ATM): {sorted(all_keys_up_to_J)}")
+
+        # Register a hook that zeros all omega_tilde gradients except
+        # row J_target, columns 1: (column 0 = ρ₀ stays frozen)
+        def _make_row_hook(row_idx):
+            def _hook(grad):
+                mask = torch.zeros_like(grad)
+                # Only allow gradients for omega_tilde[row_idx, 1:row_idx]
+                # (columns 1 through row_idx-1 are the free angles for
+                # row row_idx of B; column 0 is ρ₀, columns >= row_idx
+                # don't affect row row_idx)
+                if row_idx < grad.shape[1]:
+                    mask[row_idx, 1:row_idx] = 1.0
+                return grad * mask
+            return _hook
+
+        # Enable omega gradients, attach hook
+        params.omega_tilde.requires_grad_(True)
+        hook = params.omega_tilde.register_hook(_make_row_hook(J_target))
+
+        # Determine iteration count: scale by number of new swaptions
+        # but use at least a minimum
+        n_iters_row = max(
+            s2cfg.get("min_iterations_per_row", 80),
+            s2cfg["iterations"] // max(len(coterminal_groups), 1),
+        )
+
+        row_result = calibrate(
+            params, mkt,
+            n_iterations=n_iters_row,
+            lr=s2cfg["lr"],
+            N_paths=s2cfg["N_paths"],
+            M=s2cfg["M"],
+            scheme="hybrid",
+            hybrid_kappa=s2cfg["kappa"],
+            variance_curve_mode=s2cfg["variance_mode"],
+            use_crn=True,
+            crn_seed=cfg["crn_seed"] + 10000 + J_target,
+            log_every=20,
+            swaption_keys=sorted(all_keys_up_to_J),
+            scheduler_type=s2cfg.get("scheduler", "cosine"),
+            warmup_steps=s2cfg.get("warmup_steps", 10),
+            cosine_power=s2cfg.get("cosine_power", 0.5),
+            early_stop_patience=n_iters_row,
+            early_stop_tol=1e-5,
+            grad_clip_norm=gc2,
+            atm_only=True,
+        )
+
+        hook.remove()
+
+        if row_result["best_state"] is not None:
+            params.load_state_dict(row_result["best_state"])
+
+        stage2_histories[J_target] = row_result["history"]
+
+        with torch.no_grad():
+            p = params()
+            rho_row = p["rho"][J_target - 1, :].numpy()
+            print(f"      ρ[{J_target},:] = "
+                  f"[{', '.join(f'{r:.3f}' for r in rho_row)}]")
+
+    # Restore grad state
     params.unfix_H()
     params.alpha_tilde.requires_grad_(True)
     params.eta_tilde.requires_grad_(True)
@@ -768,16 +824,18 @@ def run_mode_adachi(params, mkt, cfg):
 
     with torch.no_grad():
         p = params()
-        print(f"\nStage 2 complete.")
+        print(f"\nStage 2 complete (incremental).")
         print(f"  ρ diag check: {torch.diag(p['rho']).numpy()}")
         print(f"  ρ₀ = [{', '.join(f'{r:.3f}' for r in p['rho0'].numpy())}]")
 
-    _rematch_alpha(params, mkt, cfg,
-                   label="Post-calibration α re-matching (MC-based Brent)")
+    # Combine stage 2 histories into a single list for plotting
+    combined_s2_history = []
+    for J_target in sorted(stage2_histories.keys()):
+        combined_s2_history.extend(stage2_histories[J_target])
 
     return {
         "stage1": stage1_result,
-        "stage2": stage2_result,
+        "stage2": {"history": combined_s2_history},
     }
 
 
@@ -810,20 +868,16 @@ def run_mode_cross(params, mkt, cfg):
         print(f"    {k[0]:.0f}Y×{k[1]:.0f}Y")
 
     s1cfg = {**ccfg["stage1"], "keys": train_keys}
+    params.alpha_tilde.requires_grad_(True)
     stage1_result = _run_hybrid_stage(
         params, mkt, cfg, s1cfg,
         freeze_H=False, crn_offset=0, label="STAGE 1 (train)")
 
-    _rematch_alpha(params, mkt, cfg, N_paths=50_000, M=ccfg["stage2"]["M"],
-                   label="Inter-stage α re-matching (MC-based Brent)")
-
+    params.alpha_tilde.requires_grad_(True)
     s2cfg = {**ccfg["stage2"], "keys": train_keys}
     stage2_result = _run_hybrid_stage(
         params, mkt, cfg, s2cfg,
         freeze_H=True, crn_offset=10000, label="STAGE 2 (train)")
-
-    _rematch_alpha(params, mkt, cfg,
-                   label="Post-calibration α re-matching (MC-based Brent)")
 
     return {
         "stage1": stage1_result,
@@ -1150,7 +1204,19 @@ def run_in_sample_diagnostics(params, mkt, cfg, diag_scheme, diag_kappa):
 
 def run_oos_evaluation(params, mkt_oos, cfg, diag_scheme, diag_kappa,
                        representative_keys):
-    """Run full out-of-sample evaluation with α re-matching."""
+    """Run full out-of-sample evaluation with α re-anchoring.
+
+    Fixes H, η, ρ₀, ρ_{ij} at their calibrated values.  α is first
+    warm-started to the OOS date's ATM levels via the simplified variance
+    formula, then fine-tuned by a short gradient-based pass through the
+    full MC graph with only α free.  This corrects both the Jensen gap
+    (formula proxy ignores stochastic variance) and the multi-rate
+    interpolation error (formula only anchors 1Y-tenor swaptions).
+
+    The smile shape parameters are never touched, so the OOS test
+    measures whether the calibrated skew/curvature structure generalises
+    across dates.
+    """
     print("\n" + "=" * 72)
     print("  OUT-OF-SAMPLE EVALUATION")
     print(f"  Calibrated on: {cfg['in_sample_date']}")
@@ -1160,8 +1226,60 @@ def run_oos_evaluation(params, mkt_oos, cfg, diag_scheme, diag_kappa,
     print_market_summary(mkt_oos)
 
     params_oos = copy.deepcopy(params)
-    _rematch_alpha(params_oos, mkt_oos, cfg,
-                   label="Re-matching α to out-of-sample ATM levels (MC-based)")
+
+    # Step 1: Formula-based α warm-start
+    with torch.no_grad():
+        p = params_oos()
+        matched_indices, alpha_oos = _formula_alpha_warmstart(
+            params_oos, mkt_oos, p["H"], p["eta"])
+        print(f"\n--- Re-initialising α to OOS ATM levels (formula-based) ---")
+        print(f"  α = [{', '.join(f'{a:.4f}' for a in alpha_oos.numpy())}]")
+
+    # Step 2: Gradient-based α fine-tuning (all other params frozen)
+    ft_cfg = cfg.get("oos_alpha_finetune", {})
+    ft_iters = ft_cfg.get("iterations", 80)
+
+    if ft_iters > 0:
+        print(f"\n--- Fine-tuning α on OOS date ({ft_iters} iterations, "
+              f"only α free) ---")
+
+        # Freeze everything except α
+        params_oos.fix_H()
+        params_oos.fix_eta()
+        params_oos.fix_omega()
+        params_oos.alpha_tilde.requires_grad_(True)
+
+        ft_result = calibrate(
+            params_oos, mkt_oos,
+            n_iterations=ft_iters,
+            lr=ft_cfg.get("lr", 5e-3),
+            N_paths=ft_cfg.get("N_paths", 20_000),
+            M=ft_cfg.get("M", 50),
+            scheme="hybrid",
+            hybrid_kappa=ft_cfg.get("kappa", 2),
+            variance_curve_mode="full",
+            use_crn=True,
+            crn_seed=cfg["crn_seed"] + 20000,
+            log_every=20,
+            swaption_keys=None,
+            scheduler_type=ft_cfg.get("scheduler", "cosine"),
+            warmup_steps=ft_cfg.get("warmup_steps", 10),
+            cosine_power=ft_cfg.get("cosine_power", 0.5),
+            early_stop_patience=ft_iters,   # no early stopping
+            early_stop_tol=1e-6,
+            grad_clip_norm=1.0,
+        )
+
+        if ft_result["best_state"] is not None:
+            params_oos.load_state_dict(ft_result["best_state"])
+
+        # Restore grad state for diagnostics (no grads needed)
+        params_oos.alpha_tilde.requires_grad_(False)
+
+        with torch.no_grad():
+            p_ft = params_oos()
+            print(f"\n  α after fine-tuning: "
+                  f"[{', '.join(f'{a:.4f}' for a in p_ft['alpha'].numpy())}]")
 
     print(f"\n--- Out-of-sample MC report ({cfg['out_sample_date']}) ---")
     report_oos = mc_diagnostics(
