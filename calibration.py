@@ -197,6 +197,7 @@ CONFIG = {
     "early_stop_patience": 150,
     "early_stop_tol": 1e-4,
     "crn_seed": 42,
+    "antithetic": True,
 
     # --- OOS α fine-tuning ---
     # After formula-based warm-start, run a short gradient pass with only
@@ -457,6 +458,7 @@ def _run_hybrid_stage(params, mkt, cfg, scfg, *,
         early_stop_tol=cfg.get("early_stop_tol", 1e-4),
         H_lr_factor=h_lr if not freeze_H else 1.0,
         grad_clip_norm=gc,
+        antithetic=cfg.get("antithetic", False),
     )
 
     if result["best_state"] is not None:
@@ -556,6 +558,7 @@ def run_mode_hybrid_exact(params, mkt, cfg):
         cosine_power=s2cfg.get("cosine_power", 0.5),
         early_stop_patience=cfg.get("early_stop_patience", 150),
         early_stop_tol=cfg.get("early_stop_tol", 1e-4),
+        antithetic=cfg.get("antithetic", False),
     )
 
     if stage2_result["best_state"] is not None:
@@ -722,6 +725,7 @@ def run_mode_roughness(mkt, cfg):
             cosine_power=hcfg.get("cosine_power", 0.5),
             early_stop_patience=hcfg.get("early_stop_patience", 200),
             early_stop_tol=1e-4,
+            antithetic=cfg.get("antithetic", False),
         )
 
         if result_h["best_state"] is not None:
@@ -1034,6 +1038,7 @@ def run_oos_evaluation(params, mkt_oos, cfg, diag_scheme, diag_kappa,
             early_stop_patience=ft_iters,   # no early stopping
             early_stop_tol=1e-6,
             grad_clip_norm=1.0,
+            antithetic=cfg.get("antithetic", False),
         )
 
         if ft_result["best_state"] is not None:

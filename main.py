@@ -1121,6 +1121,7 @@ def compute_total_loss(
     hybrid_kappa: int = 2,
     compute_diagnostics: bool = True,
     atm_only: bool = False,
+    antithetic: bool = False,
 ) -> dict:
     """Layer 6: Compute the total calibration loss over all swaptions."""
     keys = swaption_keys if swaption_keys is not None else list(mkt.swaptions.keys())
@@ -1144,6 +1145,7 @@ def compute_total_loss(
             cholesky_cache=cholesky_cache,
             scheme=scheme,
             hybrid_kappa=hybrid_kappa,
+            antithetic=antithetic,
         )
 
         mc_prices = compute_swaption_prices(S_T, swn)
@@ -1236,6 +1238,7 @@ def calibrate(
     H_lr_factor: float = 1.0,
     grad_clip_norm: float = 10.0,
     atm_only: bool = False,
+    antithetic: bool = False,
 ) -> dict:
     """Layer 7: Run the calibration loop."""
     effective_scheme = scheme if scheme is not None else ("exact" if use_exact else "approx")
@@ -1302,6 +1305,7 @@ def calibrate(
             hybrid_kappa=hybrid_kappa,
             compute_diagnostics=is_log_step,
             atm_only=atm_only,
+            antithetic=antithetic,
         )
 
         loss = result["loss"]
