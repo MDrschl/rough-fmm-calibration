@@ -5,7 +5,10 @@ import copy
 import numpy as np
 import torch
 
+import main
 from main import (
+    DTYPE,
+    set_dtype,
     MappedRoughSABRParams,
     load_market_data,
     calibrate,
@@ -34,6 +37,7 @@ CONFIG = {
     "in_sample_date": "2024-12-09",
     "out_sample_date": "2024-12-10",
     "device": "cpu",
+    "dtype": "float32",  # "float32" for speed, "float64" for precision
 
     # --- Calibration mode ---
     #   "hybrid"            — Mode A: single-stage hybrid, H differentiable
@@ -42,7 +46,7 @@ CONFIG = {
     #   "hybrid_exact"      — Mode G: hybrid S1 → exact Cholesky S2
     #   "roughness"         — Mode E: ablation study, H free vs H = 0.5
     #   "cross"             — Mode F: train/test split cross-validation
-    "mode": "hybrid_two_stage",
+    "mode": "hybrid",
 
     "hybrid": {
         "iterations": 800,
@@ -289,8 +293,8 @@ def _formula_alpha_warmstart(params, mkt, H, eta):
         # Compute G via Gauss–Legendre quadrature
         n_quad = 50
         nodes_np, weights_np = np.polynomial.legendre.leggauss(n_quad)
-        s = torch.tensor(0.5 * (nodes_np + 1.0), dtype=torch.float64)
-        w = torch.tensor(0.5 * weights_np, dtype=torch.float64)
+        s = torch.tensor(0.5 * (nodes_np + 1.0), dtype=main.DTYPE)
+        w = torch.tensor(0.5 * weights_np, dtype=main.DTYPE)
 
         smile_keys_1y = sorted([k for k in mkt.swaptions.keys() if k[1] == 1])
         matched_indices = []
@@ -1815,6 +1819,12 @@ if __name__ == "__main__":
     t_start = time.time()
     cfg = CONFIG
     mode = cfg["mode"]
+
+    # --- Set dtype ---
+    _dtype_str = cfg.get("dtype", "float32")
+    _dt = torch.float64 if _dtype_str == "float64" else torch.float32
+    set_dtype(_dt)
+    print(f"  dtype: {_dt}")
 
     # --- Load data ---
     print("Loading market data...")

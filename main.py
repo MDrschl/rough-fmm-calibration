@@ -8,6 +8,13 @@ from scipy.stats import norm
 from scipy.special import hyp2f1 as scipy_hyp2f1
 import py_lets_be_rational as _lbr
 
+DTYPE = torch.float32
+
+def set_dtype(dt: torch.dtype):
+    """Change the global dtype at runtime (before loading data)."""
+    global DTYPE
+    DTYPE = dt
+
 def _stable_key_hash(key: tuple) -> int:
     """Deterministic hash for swaption keys (expiry, tenor)."""
     return int(key[0] * 1000) * 100 + int(key[1])
@@ -120,8 +127,8 @@ def load_market_data(
     else:
         raise ValueError(f"Unknown pickle format. Available keys: {list(raw.keys())}")
 
-    P = torch.tensor(P_np, dtype=torch.float64, device=device)
-    R = torch.tensor(R_np, dtype=torch.float64, device=device)
+    P = torch.tensor(P_np, dtype=DTYPE, device=device)
+    R = torch.tensor(R_np, dtype=DTYPE, device=device)
 
     active_keys = subset_keys_all.get(subset, list(swaptions_raw.keys()))
 
@@ -182,16 +189,16 @@ def load_market_data(
             I=I, J=J,
             expiry_years=swn_raw["expiry_years"],
             tenor_years=swn_raw["tenor_years"],
-            S0=torch.tensor(S0, dtype=torch.float64, device=device),
-            A0=torch.tensor(A0, dtype=torch.float64, device=device),
-            Pi=torch.tensor(swn_raw["frozen_weights_Pi"], dtype=torch.float64, device=device),
-            pi=torch.tensor(swn_raw["normalized_weights_pi"], dtype=torch.float64, device=device),
-            strikes=torch.tensor(strikes_np, dtype=torch.float64, device=device),
-            ivs_black=torch.tensor(ivs_black_np, dtype=torch.float64, device=device),
-            ivs_normal=torch.tensor(ivs_normal_np, dtype=torch.float64, device=device),
+            S0=torch.tensor(S0, dtype=DTYPE, device=device),
+            A0=torch.tensor(A0, dtype=DTYPE, device=device),
+            Pi=torch.tensor(swn_raw["frozen_weights_Pi"], dtype=DTYPE, device=device),
+            pi=torch.tensor(swn_raw["normalized_weights_pi"], dtype=DTYPE, device=device),
+            strikes=torch.tensor(strikes_np, dtype=DTYPE, device=device),
+            ivs_black=torch.tensor(ivs_black_np, dtype=DTYPE, device=device),
+            ivs_normal=torch.tensor(ivs_normal_np, dtype=DTYPE, device=device),
             is_call=torch.tensor(is_call_np, dtype=torch.bool, device=device),
-            target_prices=torch.tensor(prices_np, dtype=torch.float64, device=device),
-            vegas=torch.tensor(vegas_np, dtype=torch.float64, device=device),
+            target_prices=torch.tensor(prices_np, dtype=DTYPE, device=device),
+            vegas=torch.tensor(vegas_np, dtype=DTYPE, device=device),
             n_strikes=n_strikes,
         )
         swaptions[key] = swn
@@ -221,18 +228,18 @@ class MappedRoughSABRParams(nn.Module):
         self._device = device
 
         self.H_tilde = nn.Parameter(
-            torch.tensor(-1.386294, dtype=torch.float64, device=device)
+            torch.tensor(-1.386294, dtype=DTYPE, device=device)
         )
 
         self.eta_tilde = nn.Parameter(
-            torch.tensor(1.854587, dtype=torch.float64, device=device)
+            torch.tensor(1.854587, dtype=DTYPE, device=device)
         )
 
         self.alpha_tilde = nn.Parameter(
-            torch.full((N,), -0.853, dtype=torch.float64, device=device)
+            torch.full((N,), -0.853, dtype=DTYPE, device=device)
         )
 
-        init_omega = torch.zeros(N + 1, N + 1, dtype=torch.float64, device=device)
+        init_omega = torch.zeros(N + 1, N + 1, dtype=DTYPE, device=device)
         init_omega[1:, 0] = np.log(0.5)
         self.omega_tilde = nn.Parameter(init_omega)
 
@@ -252,7 +259,7 @@ class MappedRoughSABRParams(nn.Module):
         """Full (N+1)×(N+1) correlation matrix Σ for (W⁰, W¹, ..., Wᴺ)."""
         Np1 = self.N + 1
 
-        omega = torch.zeros(Np1, Np1, dtype=torch.float64, device=self._device)
+        omega = torch.zeros(Np1, Np1, dtype=DTYPE, device=self._device)
 
         omega[1:, 0] = (
             torch.pi / 2 + (torch.pi / 2) * torch.sigmoid(self.omega_tilde[1:, 0])
@@ -260,10 +267,10 @@ class MappedRoughSABRParams(nn.Module):
 
         omega[1:, 1:] = torch.pi * torch.sigmoid(self.omega_tilde[1:, 1:])
 
-        B = torch.zeros(Np1, Np1, dtype=torch.float64, device=self._device)
+        B = torch.zeros(Np1, Np1, dtype=DTYPE, device=self._device)
 
         for i in range(Np1):
-            sin_prod = torch.ones(1, dtype=torch.float64, device=self._device)
+            sin_prod = torch.ones(1, dtype=DTYPE, device=self._device)
             for l in range(i):
                 B[i, l] = torch.cos(omega[i, l]) * sin_prod
                 sin_prod = sin_prod * torch.sin(omega[i, l])
@@ -489,7 +496,7 @@ def compute_v_curve(
     M = time_grid.shape[0]
 
     if mode == "constant":
-        return torch.ones(M, dtype=torch.float64, device=time_grid.device)
+        return torch.ones(M, dtype=DTYPE, device=time_grid.device)
 
     if mode == "simplified":
         two_H = 2.0 * H
@@ -563,7 +570,7 @@ def build_cholesky(H: float, M: int, T: float, device: str = "cpu") -> torch.Ten
     """Build and Cholesky-decompose the fBM-BM covariance matrix."""
     cov = covariance_matrix_rBergomi(H, M, T)
     L = np.linalg.cholesky(cov)
-    return torch.tensor(L, dtype=torch.float64, device=torch.device(device))
+    return torch.tensor(L, dtype=DTYPE, device=torch.device(device))
 
 def simulate_exact(
     S0: torch.Tensor,
@@ -585,25 +592,25 @@ def simulate_exact(
 
     if antithetic:
         N_half = N_paths // 2
-        Z_corr_half = torch.randn(2 * M, N_half, dtype=torch.float64, device=device)
-        Z_indep_half = torch.randn(N_half, M, dtype=torch.float64, device=device) * np.sqrt(h)
+        Z_corr_half = torch.randn(2 * M, N_half, dtype=DTYPE, device=device)
+        Z_indep_half = torch.randn(N_half, M, dtype=DTYPE, device=device) * np.sqrt(h)
         Z_corr = torch.cat([Z_corr_half, -Z_corr_half], dim=1)
         Z_indep = torch.cat([Z_indep_half, -Z_indep_half], dim=0)
     else:
-        Z_corr = torch.randn(2 * M, N_paths, dtype=torch.float64, device=device)
-        Z_indep = torch.randn(N_paths, M, dtype=torch.float64, device=device) * np.sqrt(h)
+        Z_corr = torch.randn(2 * M, N_paths, dtype=DTYPE, device=device)
+        Z_indep = torch.randn(N_paths, M, dtype=DTYPE, device=device) * np.sqrt(h)
 
     prod_mat = (cholesky_L @ Z_corr).T
 
-    log_S = torch.log(S0) * torch.ones(N_paths, dtype=torch.float64, device=device)
+    log_S = torch.log(S0) * torch.ones(N_paths, dtype=DTYPE, device=device)
 
     two_H = 2.0 * H
     sqrt_2H = torch.sqrt(two_H)
     eta_sq = eta ** 2
 
-    V_current = v0 * torch.ones(N_paths, dtype=torch.float64, device=device)
+    V_current = v0 * torch.ones(N_paths, dtype=DTYPE, device=device)
 
-    prev_W = torch.zeros(N_paths, dtype=torch.float64, device=device)
+    prev_W = torch.zeros(N_paths, dtype=DTYPE, device=device)
 
     for i in range(M):
         t_next = (i + 1) * h
@@ -649,20 +656,20 @@ def simulate_approx(
 
     if antithetic:
         N_half = N_paths // 2
-        dW0_half = torch.randn(N_half, M, dtype=torch.float64, device=device) * sqrt_h
-        dW_perp_half = torch.randn(N_half, M, dtype=torch.float64, device=device) * sqrt_h
+        dW0_half = torch.randn(N_half, M, dtype=DTYPE, device=device) * sqrt_h
+        dW_perp_half = torch.randn(N_half, M, dtype=DTYPE, device=device) * sqrt_h
         dW0 = torch.cat([dW0_half, -dW0_half], dim=0)
         dW_perp = torch.cat([dW_perp_half, -dW_perp_half], dim=0)
     else:
-        dW0 = torch.randn(N_paths, M, dtype=torch.float64, device=device) * sqrt_h
-        dW_perp = torch.randn(N_paths, M, dtype=torch.float64, device=device) * sqrt_h
+        dW0 = torch.randn(N_paths, M, dtype=DTYPE, device=device) * sqrt_h
+        dW_perp = torch.randn(N_paths, M, dtype=DTYPE, device=device) * sqrt_h
 
-    log_S = torch.log(S0) * torch.ones(N_paths, dtype=torch.float64, device=device)
+    log_S = torch.log(S0) * torch.ones(N_paths, dtype=DTYPE, device=device)
     two_H = 2.0 * H
     sqrt_2H = torch.sqrt(two_H)
     eta_sq = eta ** 2
 
-    V_current = v0 * torch.ones(N_paths, dtype=torch.float64, device=device)
+    V_current = v0 * torch.ones(N_paths, dtype=DTYPE, device=device)
 
     for i in range(M):
         t_next = (i + 1) * h
@@ -670,7 +677,7 @@ def simulate_approx(
         brownian_incr = rho_eff * dW0[:, i] + sqrt_rho * dW_perp[:, i]
         log_S = log_S - 0.5 * V_current * h + torch.sqrt(V_current) * brownian_incr
 
-        lags = h * (i + 1 - torch.arange(0, i + 1, dtype=torch.float64, device=device))
+        lags = h * (i + 1 - torch.arange(0, i + 1, dtype=DTYPE, device=device))
         kernels = lags ** (H - 0.5)
         fBm_next = dW0[:, 0:i+1] @ kernels
 
@@ -700,15 +707,19 @@ def build_hybrid_covariance(
     kappa: int,
     device: str = "cpu",
 ) -> torch.Tensor:
-    """Build the (κ+1)×(κ+1) covariance matrix Σ for the BLP hybrid scheme."""
+    """Build the (κ+1)×(κ+1) covariance matrix Σ for the BLP hybrid scheme.
+    
+    Always computed in float64 for Cholesky numerical stability.
+    """
     dim = kappa + 1
     Sigma = torch.zeros(dim, dim, dtype=torch.float64, device=device)
 
     u = torch.tensor(_GL64_NODES, dtype=torch.float64, device=device)
     w = torch.tensor(_GL64_WEIGHTS, dtype=torch.float64, device=device)
 
-    alpha1 = alpha + 1.0
-    two_alpha1 = 2.0 * alpha + 1.0
+    alpha_f64 = alpha.double()
+    alpha1 = alpha_f64 + 1.0
+    two_alpha1 = 2.0 * alpha_f64 + 1.0
     h_t = torch.tensor(h, dtype=torch.float64, device=device)
 
     Sigma[0, 0] = h_t
@@ -726,7 +737,7 @@ def build_hybrid_covariance(
         for k in range(j, dim):
             kf = float(k)
             k_t = torch.tensor(kf, dtype=torch.float64, device=device)
-            integrand = (j_t - u) ** alpha * (k_t - u) ** alpha
+            integrand = (j_t - u) ** alpha_f64 * (k_t - u) ** alpha_f64
             integral = (w * integrand).sum()
             cov_jk = h_t ** two_alpha1 * integral
             Sigma[j, k] = cov_jk
@@ -743,11 +754,11 @@ def compute_bstar_weights(
     device: str = "cpu",
 ) -> torch.Tensor:
     """Compute optimal far-field kernel weights for the BLP hybrid scheme."""
-    h_t = torch.tensor(h, dtype=torch.float64, device=device)
+    h_t = torch.tensor(h, dtype=DTYPE, device=device)
     alpha1 = alpha + 1.0
-    weights = torch.zeros(M, dtype=torch.float64, device=device)
+    weights = torch.zeros(M, dtype=DTYPE, device=device)
 
-    k_vals = torch.arange(kappa + 1, M + 1, dtype=torch.float64, device=device)
+    k_vals = torch.arange(kappa + 1, M + 1, dtype=DTYPE, device=device)
     km1_vals = k_vals - 1.0
 
     bstar_alpha = (k_vals ** alpha1 - km1_vals ** alpha1) / alpha1
@@ -794,26 +805,28 @@ def simulate_hybrid(
             f"BLP hybrid Cholesky failed after 5 attempts "
             f"(α={alpha.item():.4f}, h={h:.6f}, κ={kappa})"
         )
+    # Cast to working dtype after stable factorisation
+    L_near = L_near.to(DTYPE)
 
     far_weights = compute_bstar_weights(alpha, h, kappa, M, device=device)
 
     if antithetic:
         N_half = N_paths // 2
-        Z_half = torch.randn(N_half, M, kappa + 1, dtype=torch.float64, device=device)
+        Z_half = torch.randn(N_half, M, kappa + 1, dtype=DTYPE, device=device)
         Z = torch.cat([Z_half, -Z_half], dim=0)
-        dW_perp_half = torch.randn(N_half, M, dtype=torch.float64, device=device) * np.sqrt(h)
+        dW_perp_half = torch.randn(N_half, M, dtype=DTYPE, device=device) * np.sqrt(h)
         dW_perp = torch.cat([dW_perp_half, -dW_perp_half], dim=0)
     else:
-        Z = torch.randn(N_paths, M, kappa + 1, dtype=torch.float64, device=device)
-        dW_perp = torch.randn(N_paths, M, dtype=torch.float64, device=device) * np.sqrt(h)
+        Z = torch.randn(N_paths, M, kappa + 1, dtype=DTYPE, device=device)
+        dW_perp = torch.randn(N_paths, M, dtype=DTYPE, device=device) * np.sqrt(h)
 
     W_vec = Z @ L_near.T
 
     dW0 = W_vec[:, :, 0]
     W_near = W_vec[:, :, 1:]
 
-    log_S = torch.log(S0) * torch.ones(N_paths, dtype=torch.float64, device=device)
-    V_current = v0 * torch.ones(N_paths, dtype=torch.float64, device=device)
+    log_S = torch.log(S0) * torch.ones(N_paths, dtype=DTYPE, device=device)
+    V_current = v0 * torch.ones(N_paths, dtype=DTYPE, device=device)
 
     for i in range(M):
         t_next = (i + 1) * h
@@ -821,7 +834,7 @@ def simulate_hybrid(
         brownian_incr = rho_eff * dW0[:, i] + sqrt_rho * dW_perp[:, i]
         log_S = log_S - 0.5 * V_current * h + torch.sqrt(V_current) * brownian_incr
 
-        fBm_val = torch.zeros(N_paths, dtype=torch.float64, device=device)
+        fBm_val = torch.zeros(N_paths, dtype=DTYPE, device=device)
 
         n_near = min(i + 1, kappa)
         for k in range(1, n_near + 1):
@@ -887,20 +900,20 @@ def simulate_sabr(
     # Draw standard normals
     if antithetic:
         N_half = N_paths // 2
-        dW0_half = torch.randn(N_half, M, dtype=torch.float64, device=device) * sqrt_h
-        dWperp_half = torch.randn(N_half, M, dtype=torch.float64, device=device) * sqrt_h
+        dW0_half = torch.randn(N_half, M, dtype=DTYPE, device=device) * sqrt_h
+        dWperp_half = torch.randn(N_half, M, dtype=DTYPE, device=device) * sqrt_h
         dW0 = torch.cat([dW0_half, -dW0_half], dim=0)
         dWperp = torch.cat([dWperp_half, -dWperp_half], dim=0)
     else:
-        dW0 = torch.randn(N_paths, M, dtype=torch.float64, device=device) * sqrt_h
-        dWperp = torch.randn(N_paths, M, dtype=torch.float64, device=device) * sqrt_h
+        dW0 = torch.randn(N_paths, M, dtype=DTYPE, device=device) * sqrt_h
+        dWperp = torch.randn(N_paths, M, dtype=DTYPE, device=device) * sqrt_h
 
     # Cumulative W⁰: shape (N_paths, M)
     W0_cumulative = torch.cumsum(dW0, dim=1)
 
     # Initialise
-    log_S = torch.log(S0) * torch.ones(N_paths, dtype=torch.float64, device=device)
-    V_current = v0 * torch.ones(N_paths, dtype=torch.float64, device=device)
+    log_S = torch.log(S0) * torch.ones(N_paths, dtype=DTYPE, device=device)
+    V_current = v0 * torch.ones(N_paths, dtype=DTYPE, device=device)
 
     for i in range(M):
         t_next = (i + 1) * h
@@ -946,7 +959,7 @@ def simulate_swaption(
     eff = compute_effective_params(p["alpha"], p["rho0"], p["rho"], swn)
 
     h = T / M
-    time_grid = torch.arange(1, M + 1, dtype=torch.float64,
+    time_grid = torch.arange(1, M + 1, dtype=DTYPE,
                              device=params._device) * h
     v_curve = compute_v_curve(
         time_grid, swn, mkt, H=p["H"], eta=p["eta"],
@@ -1032,8 +1045,8 @@ def compute_vbar(
     w_np = 0.5 * weights_np
 
     device = v0.device if hasattr(v0, 'device') else 'cpu'
-    s = torch.tensor(s_np, dtype=torch.float64, device=device)
-    w = torch.tensor(w_np, dtype=torch.float64, device=device)
+    s = torch.tensor(s_np, dtype=DTYPE, device=device)
+    w = torch.tensor(w_np, dtype=DTYPE, device=device)
     t_points = T * s
 
     if mode == "simplified":
@@ -1103,7 +1116,7 @@ def compute_loss_ivspace(
     model_ivs = mc_prices_to_black_iv(mc_prices.detach(), swn)
     valid = ~torch.isnan(model_ivs)
     if valid.sum() == 0:
-        return torch.tensor(0.0, dtype=torch.float64)
+        return torch.tensor(0.0, dtype=DTYPE)
     diff = model_ivs[valid] - swn.ivs_black[valid]
     return (diff ** 2).sum()
 
@@ -1126,7 +1139,7 @@ def compute_total_loss(
     """Layer 6: Compute the total calibration loss over all swaptions."""
     keys = swaption_keys if swaption_keys is not None else list(mkt.swaptions.keys())
 
-    total_loss = torch.tensor(0.0, dtype=torch.float64, device=params._device)
+    total_loss = torch.tensor(0.0, dtype=DTYPE, device=params._device)
     total_loss_iv = 0.0
     n_valid_strikes = 0
     per_swaption = {}
@@ -1157,7 +1170,7 @@ def compute_total_loss(
                            / (swn.vegas[atm_mask] + 1e-30)) ** 2
                 loss_vw = loss_vw.sum()
             else:
-                loss_vw = torch.tensor(0.0, dtype=torch.float64,
+                loss_vw = torch.tensor(0.0, dtype=DTYPE,
                                        device=params._device)
         else:
             loss_vw = compute_loss_vegaweighted(mc_prices, swn)
@@ -1809,3 +1822,12 @@ if __name__ == "__main__":
         )
 
     print("\nDone.")
+
+import os as _os
+if (hasattr(torch, "compile")
+        and _os.environ.get("TORCH_COMPILE", "1") != "0"):
+    _compile_opts = dict(mode="reduce-overhead")
+    simulate_exact = torch.compile(simulate_exact, **_compile_opts)
+    simulate_approx = torch.compile(simulate_approx, **_compile_opts)
+    simulate_hybrid = torch.compile(simulate_hybrid, **_compile_opts)
+    simulate_sabr = torch.compile(simulate_sabr, **_compile_opts)
