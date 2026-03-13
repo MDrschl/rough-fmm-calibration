@@ -197,6 +197,7 @@ def generate_shell_script(runs, args, results_dir):
 def main():
     parser = argparse.ArgumentParser(description="Generate calibration run scripts")
     parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
+    parser.add_argument("--dtype", default="float32", choices=["float32", "float64"])
     parser.add_argument("--phase", default="all", choices=["1", "2", "all"])
     parser.add_argument("--currency", default="both", choices=["usd", "eur", "both"])
     parser.add_argument("--dry-run", action="store_true")
@@ -232,6 +233,7 @@ def main():
                         "in_sample_date": train_date,
                         "out_sample_date": oos_date,
                         "device": args.device,
+                        "dtype": args.dtype,
                         "mode": mode,
                     }
                     out = run_dir(args.results_dir, ccy,
@@ -274,6 +276,7 @@ def main():
                     "in_sample_date": train_date,
                     "out_sample_date": oos_date,
                     "device": args.device,
+                    "dtype": args.dtype,
                     "mode": "roughness",
                 }
                 out = run_dir(args.results_dir, ccy,
@@ -302,6 +305,7 @@ def main():
                     "in_sample_date": train_date,
                     "out_sample_date": oos_date,
                     "device": args.device,
+                    "dtype": args.dtype,
                     "mode": "cross",
                 }
                 out = run_dir(args.results_dir, ccy,
