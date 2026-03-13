@@ -1,6 +1,6 @@
 # rough-fmm-calibration
 
-Calibration of the **Mapped Rough SABR Forward Market Model (FMM)** to swaption surfaces via Automatic Differentiation through Monte Carlo (AMCC). Implements the framework of Gonon & Stockinger (2025) applied to the rough Bergomi FMM of Adachi, Carr & Polishchuk (2025), calibrated jointly across USD SOFR and EUR swaption surfaces.
+Calibration of the **Mapped Rough SABR Forward Market Model (FMM)** to swaption surfaces via Automatic Differentiation through Monte Carlo (AMCC). Implements the framework of Gonon & Stockinger (2025) applied to the rough Bergomi FMM of Adachi et al. (2025), calibrated jointly across USD SOFR and EUR ESTR swaption surfaces.
 
 ---
 
