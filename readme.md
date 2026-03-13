@@ -1,6 +1,6 @@
 # rough-fmm-calibration
 
-Calibration of the **Mapped Rough SABR Forward Market Model (FMM)** to swaption surfaces via Automatic Differentiation through Monte Carlo (AMCC). Implements the framework of Gonon & Stockinger (2025) applied to the rough Bergomi FMM of Adachi et al. (2025), calibrated jointly across USD SOFR and EUR ESTR swaption surfaces.
+Calibration of the **Mapped Rough SABR Forward Market Model (FMM)** to swaption surfaces via Automatic Monte Carlo Calibration (AMCC). Implements the framework of Gonon & Stockinger (2025) applied to the rough SABR FMM of Adachi et al. (2025), calibrated jointly across USD SOFR and EUR ESTR swaption surfaces.
 
 ---
 
@@ -10,14 +10,14 @@ Calibration of the **Mapped Rough SABR Forward Market Model (FMM)** to swaption 
 rough-fmm-calibration/
 ├── main.py                    # Model core: simulation, pricing, parameter module
 ├── calibration.py             # Calibration modes, α matching, diagnostics
-├── calibration_joint_alpha.py # Variant: α jointly optimised throughout (no Brent re-matching)
 ├── preprocessing.py           # Raw Bloomberg data → calibration-ready .pkl
+├── run_all_calibrations.py    # Master orchestration: generates driver scripts + run_all.sh
 ├── dataUSD/                   # Raw USD SOFR swaption data (Bloomberg London Close)
 │   ├── Dez2024IV.xlsx         # Dec 2024 implied vol sheets (ATM + OTM)
 │   ├── Dez2024SOFR.xlsx       # Dec 2024 SOFR swap rates
 │   ├── Dez2025IV.xlsx         # Dec 2025 implied vol sheets (ATM + OTM)
 │   └── Dez2025SOFR.xlsx       # Dec 2025 SOFR swap rates
-├── dataEUR/                   # Raw EUR swaption data (same format as dataUSD)
+├── dataEUR/                   # Raw EUR ESTR swaption data (same format)
 │   ├── Dez2024IV.xlsx
 │   ├── Dez2024SOFR.xlsx
 │   ├── Dez2025IV.xlsx
@@ -31,21 +31,19 @@ rough-fmm-calibration/
 
 ## Model
 
-The model is a **Mapped Rough SABR FMM** on an annual tenor grid $T_0, \ldots, T_N$ with $N = 11$. Each forward term rate $R^j$ follows
+The model is a **Mapped Rough SABR FMM** on an annual tenor grid $T_0, \ldots, T_N$ with $N = 11$. Each forward term rate $R^j$ follows rough SABR dynamics under the HJM-consistent framework of Adachi et al. (2025), with variance driven by a Volterra process with Hurst parameter $H \in (0, \tfrac{1}{2})$. Through the FMM aggregation and freezing approximation, each swaption is priced under a mapped single-rate rough Bergomi model with effective parameters $v(0)$, $\rho_{\mathrm{eff}}$, and variance curve $v(t)/v(0)$.
 
-$$\mathrm{d}R^j_t = R^j_t \, \sqrt{V^j_t} \left( \rho_{0,j} \, \mathrm{d}\bar{W}^j_t + \sqrt{1-\rho_{0,j}^2} \, \mathrm{d}Z^j_t \right)$$
-
-where the stochastic variance $V^j$ is driven by a rough Volterra process with Hurst parameter $H \in (0, \tfrac{1}{2})$. The parameter vector comprises:
+### Parameters
 
 | Symbol | Description | Dim |
 |--------|-------------|-----|
 | $H$ | Hurst / roughness parameter | 1 |
-| $\eta$ | Vol-of-vol | 1 |
+| $\eta$ | Vol-of-vol (rough Bergomi convention, $\kappa = \eta\sqrt{2H}$) | 1 |
 | $\alpha_j$ | Variance levels | $N$ |
 | $\rho_{0,j}$ | Spot–vol correlations | $N$ |
 | $\rho_{ij}$ | Inter-rate correlations (Rapisarda angles $\omega$) | $N(N-1)/2$ |
 
-Total: $n \approx 80$ parameters for $N = 11$.
+Total: $n = 79$ parameters for $N = 11$.
 
 ---
 
@@ -53,10 +51,10 @@ Total: $n \approx 80$ parameters for $N = 11$.
 
 ### Format
 
-Both `dataUSD/` and `dataEUR/` follow the same Bloomberg London Close layout. Each date cluster consists of two Excel files:
+Both `dataUSD/` and `dataEUR/` follow the Bloomberg London Close layout. Each date cluster consists of two Excel files:
 
-- `{Month}{Year}IV.xlsx` — implied volatility sheets, one per date, split into ATM and OTM tabs. All IVs are **Bachelier (normal) vol in basis points**.
-- `{Month}{Year}SOFR.xlsx` (USD) / `{Month}{Year}Rates.xlsx` (EUR) — swap rates used to bootstrap discount factors.
+- `Dez{Year}IV.xlsx` — implied volatility sheets, one per date, split into ATM and OTM tabs. All IVs are **Bachelier (normal) vol in basis points**.
+- `Dez{Year}SOFR.xlsx` (USD) / `Dez{Year}Rates.xlsx` (EUR) — swap rates used to bootstrap discount factors.
 
 Sheet naming convention: prefix `DDMM` encodes the date (e.g. `0912` = 9 December).
 
@@ -65,11 +63,11 @@ Sheet naming convention: prefix `DDMM` encodes the date (e.g. `0912` = 9 Decembe
 | Currency | Dates |
 |----------|-------|
 | USD SOFR | 2024-12-09, 2024-12-10, 2024-12-11, 2025-12-08, 2025-12-09, 2025-12-10 |
-| EUR | same date range |
+| EUR ESTR | same date range |
 
 ### Swaption grid
 
-55 swaptions per date: expiries 1Y–10Y crossed with tenors 1Y–10Y on the annual grid, with full 9-strike smiles (ATM ± 200/100/50/25 bp) for selected expiry×tenor combinations and ATM-only for the remainder.
+19 swaptions per date with full 9-strike smiles: expiries $\{1, 3, 5, 7, 10\}$Y crossed with tenors such that $I + \text{tenor} \leq 11$. Strikes: ATM $\pm$ 200/100/50/25 bp.
 
 ---
 
@@ -98,34 +96,16 @@ py_lets_be_rational>=1.0
 Run once per currency to convert raw Bloomberg Excel files into calibration-ready `.pkl` files:
 
 ```bash
-# USD
-python preprocessing.py --currency usd
-
-# EUR  
-python preprocessing.py --currency eur
+python preprocessing.py    # generates usd_swaption_data.pkl (default)
 ```
 
-This reads from `dataUSD/` (or `dataEUR/`), bootstraps discount factors from swap rates, converts Bachelier IVs to Black IVs via `black_iv()` from `main.py`, and writes `usd_swaption_data.pkl` / `eur_swaption_data.pkl`.
-
-The output pickle is a dict keyed by ISO date string:
-```python
-{
-    "2024-12-09": {
-        "discount_factors": np.ndarray,   # shape (N+1,)
-        "forward_term_rates": np.ndarray, # shape (N,)
-        "swaptions": { (I, J): SwaptionData, ... },
-    },
-    ...
-    "dates": ["2024-12-09", ...],
-    "metadata": { "T_N": 11, "theta": 1.0, ... },
-}
-```
+This reads from `dataUSD/` (or `dataEUR/`), bootstraps discount factors from swap rates, converts Bachelier IVs to Black IVs, and writes the output pickle.
 
 ---
 
 ## Calibration
 
-Configure the run in the `CONFIG` dict at the top of `calibration.py` (or `calibration_joint_alpha.py`), then:
+Configure the run in the `CONFIG` dict at the top of `calibration.py`, then:
 
 ```bash
 python calibration.py
@@ -138,10 +118,11 @@ CONFIG = {
     "data_file":       "usd_swaption_data.pkl",
     "in_sample_date":  "2024-12-09",
     "out_sample_date": "2024-12-10",
-    "mode":            "hybrid_two_stage",   # see modes below
-    "device":          "cpu",
+    "mode":            "hybrid_two_stage",
+    "device":          "cpu",        # "cpu" or "cuda"
+    "dtype":           "float32",    # "float32" for speed, "float64" for precision
+    "antithetic":      True,
     "crn_seed":        42,
-    ...
 }
 ```
 
@@ -149,16 +130,63 @@ CONFIG = {
 
 | Mode | Description |
 |------|-------------|
-| `hybrid` | Single-stage hybrid BLP, all parameters free |
-| `hybrid_two_stage` | **Recommended.** Stage 1: simplified variance curve, $H$ free. Stage 2: full variance curve, $H$ frozen |
-| `hybrid_exact` | Stage 1: hybrid BLP. Stage 2: exact Cholesky simulation |
-| `adachi` | Stage 1: 1Y-tenor smiles → $H, \eta, \alpha, \rho_0$. Stage 2: multi-rate ATM → $\rho_{ij}$ |
-| `cross` | Train/test split cross-validation |
-| `roughness` | Ablation study sweeping fixed $H$ values against free-$H$ baseline |
+| `hybrid` | Single-stage hybrid BLP, all parameters free, full variance curve |
+| `hybrid_two_stage` | **Primary.** Stage 1: simplified variance curve, $H$ free. Stage 2: full variance curve, $H$ frozen |
+| `hybrid_exact` | Stage 1: hybrid BLP. Stage 2: exact Cholesky ($H$ frozen, not differentiable) |
+| `two_stage` | Stage 1: approximate kernel. Stage 2: exact Cholesky |
+| `cross` | Train/test split cross-validation (13 train, 6 held-out swaptions) |
+| `roughness` | Ablation study: re-calibrate at fixed $H \in \{0.05, 0.10, \ldots, 0.50\}$ |
 
-### calibration_joint_alpha.py
+### Variance reduction
 
-A variant of `calibration.py` where $\alpha_j$ are warm-started by formula-based ATM matching at initialisation and then **updated jointly** with all other parameters by gradient descent throughout. The out-of-graph MC Brent re-matching steps are removed. Use this to evaluate whether fully joint $\alpha$ optimisation achieves comparable calibration accuracy.
+Both **common random numbers** (CRN) and **antithetic variates** are applied during calibration. CRN seeds each swaption's simulation deterministically per iteration; antithetic variates draw $N/2$ paths and mirror them, doubling effective paths at no extra cost. Both techniques reduce MC gradient variance.
+
+### Out-of-sample evaluation
+
+After calibration, the model is evaluated on the following trading date. All parameters except $\alpha$ are frozen; $\alpha$ is fine-tuned from the calibrated values via a short gradient pass (80 iterations, only $\alpha$ free). The diagnostic pass uses the same simulation scheme as calibration to avoid scheme-mismatch bias.
+
+---
+
+## Full analysis
+
+`run_all_calibrations.py` generates driver scripts and a shell script for the complete analysis:
+
+```bash
+# Generate scripts (dry run to preview)
+python run_all_calibrations.py --device cuda --dtype float32 --dry-run
+
+# Generate and inspect
+python run_all_calibrations.py --device cuda --dtype float32
+
+# Run everything
+bash run_all.sh
+```
+
+### Phase 1: Mode comparison (16 runs)
+- 4 modes × 2 anchor dates × 2 currencies
+- Each run: train on anchor date, evaluate OOS on following day
+- Compares IS RMSE, OOS RMSE, wall time
+
+### Phase 2: Deep analysis with hybrid_two_stage (8 runs)
+- 4 roughness ablations (2 dates × 2 currencies)
+- 4 cross-validations (2 dates × 2 currencies)
+
+Output structure:
+```
+results/
+  usd/
+    phase1_modes/{hybrid,hybrid_two_stage,...}/{2024-12-09,2025-12-08}/
+    phase2_roughness/roughness/{2024-12-09,2025-12-08}/
+    phase2_cross/cross/{2024-12-09,2025-12-08}/
+  eur/
+    ...
+```
+
+---
+
+## Performance
+
+The global dtype defaults to `float32`, which roughly doubles throughput vs `float64` on both CPU and GPU. `torch.compile` (PyTorch 2.0+) is applied automatically to the simulation functions, fusing the time-stepping loop to eliminate per-step Python overhead. Disable with `TORCH_COMPILE=0` environment variable. Set `"dtype": "float64"` in CONFIG for bit-identical results with the original implementation.
 
 ---
 
@@ -168,14 +196,14 @@ After a calibration run the following files are written to the working directory
 
 | File | Contents |
 |------|----------|
-| `amcc_calibration_results.pt` | Full results dict: calibrated parameters, loss history, config |
-| `amcc_smile_fits.png` | In-sample smile fit plots for all swaptions |
+| `amcc_calibration_results.pt` | Full results: calibrated parameters, loss history, config |
+| `amcc_smile_fits.png` | In-sample smile fit plots |
 | `amcc_smile_fits_oos.png` | Out-of-sample smile fit plots |
-| `amcc_loss_curve.png` | Loss and RMSE history across iterations |
-| `amcc_gradient_comparison.png` | Per-parameter gradient norm curves |
-| `roughness_ablation_results.pt` | (roughness mode only) RMSE by fixed $H$ value |
+| `amcc_convergence.png` | Loss and RMSE convergence history |
+| `amcc_gradient_norms.png` | Per-parameter gradient norms |
+| `amcc_correlation.png` | Calibrated correlation matrix |
+| `roughness_ablation_results.pt` | (roughness mode) RMSE by fixed $H$ |
 
-Load results:
 ```python
 import torch
 results = torch.load("amcc_calibration_results.pt", weights_only=False)
@@ -189,12 +217,24 @@ print(f"α = {results['alpha']}")
 
 Two variance curve modes are used across calibration stages:
 
-**Simplified** (Stage 1, clean $\nabla_H$, no cross-rate coupling):
+**Simplified** (Stage 1):
 $$\xi_j(t) = \alpha_j^2 \exp\!\left(\frac{\kappa^2 t^{2H}}{8H}\right)$$
 
 **Full** (Stage 2, includes measure-change drift corrections):
 $$\xi_j(t) = \alpha_j^2 \exp\!\left\{\frac{\kappa^2 t^{2H}}{8H} - \sum_{i=j+1}^{N} \frac{\theta_i R_0^i}{1+\theta_i R_0^i}\,\alpha_i\,\rho_{0,i}\,\kappa \int_0^t (t{-}s)^{H-1/2}\gamma_i(s)\,\mathrm{d}s \right\}$$
 
-The full curve lies strictly above the simplified one ($\rho_{0,i} \leq 0$), which is why an inter-stage $\alpha$ correction is needed in `calibration.py` when switching modes between stages.
+The full curve lies strictly above the simplified one ($\rho_{0,i} \leq 0$). When Stage 2 activates the full curve, $\alpha$ self-corrects via gradient descent within the first few iterations.
 
 ---
+
+## References
+
+- Adachi, R., Fukasawa, M., Iida, N., Ikeda, M., Nakatsu, Y., Tsurumi, R. & Yamakami, T. (2025). *Rough SABR Forward Market Model*. arXiv:2509.25975.
+- Gonon, L. & Stockinger, W. (2025). Leveraging Deep Learning Optimization for Monte Carlo Calibration of (Rough) Stochastic Volatility Models. *Proc. 6th ACM ICAIF*, 779–787.
+- Bennedsen, M., Lunde, A. & Pakkanen, M. S. (2017). Hybrid scheme for Brownian semistationary processes. *Finance and Stochastics*, 21(4), 931–965.
+- Rapisarda, F., Brigo, D. & Mercurio, F. (2007). Parameterizing correlations: a geometric interpretation. *IMA J. Management Mathematics*, 18(1), 55–73.
+- Glasserman, P. & Yao, D. D. (1992). Some guidelines and guarantees for common random numbers. *Management Science*, 38(6), 884–908.
+- Bayer, C., Friz, P. & Gatheral, J. (2016). Pricing under rough volatility. *Quantitative Finance*, 16(6), 887–904.
+- Lyashenko, A. & Mercurio, F. (2019). Looking forward to backward-looking rates. *SSRN* 3330240.
+- Hagan, P. S., Kumar, D., Lesniewski, A. S. & Woodward, D. E. (2002). Managing smile risk. *The Best of Wilmott*, 1, 249–296.
+- Kingma, D. P. & Ba, J. (2014). Adam: A method for stochastic optimization. *arXiv:1412.6980*.
