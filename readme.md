@@ -1,6 +1,6 @@
 # rough-fmm-calibration
 
-Calibration of the **Mapped Rough SABR Forward Market Model (FMM)** to swaption surfaces via Automatic Differentiation through Monte Carlo (AMCC). Implements the framework of Gonon & Schwab (2025) applied to the rough Bergomi FMM of Adachi, Carr & Polishchuk (2025), calibrated jointly across USD SOFR and EUR swaption surfaces.
+Calibration of the **Mapped Rough SABR Forward Market Model (FMM)** to swaption surfaces via Automatic Differentiation through Monte Carlo (AMCC). Implements the framework of Gonon & Stockinger (2025) applied to the rough Bergomi FMM of Adachi, Carr & Polishchuk (2025), calibrated jointly across USD SOFR and EUR swaption surfaces.
 
 ---
 
@@ -198,12 +198,3 @@ $$\xi_j(t) = \alpha_j^2 \exp\!\left\{\frac{\kappa^2 t^{2H}}{8H} - \sum_{i=j+1}^{
 The full curve lies strictly above the simplified one ($\rho_{0,i} \leq 0$), which is why an inter-stage $\alpha$ correction is needed in `calibration.py` when switching modes between stages.
 
 ---
-
-## References
-
-- Adachi, Carr & Polishchuk (2025). *Rough SABR Forward Market Model*
-- Gonon & Schwab (2025). *Leveraging AMCC for derivative calibration*
-- Bennedsen, Lunde & Pakkanen (2017). *Hybrid scheme for BSS processes*
-- McCrickerd & Pakkanen (2018). *Turbocharging Monte Carlo pricing for rough vol*
-- Jackel (2015). *Let's Be Rational*
-- Kingma & Ba (2015). *Adam: A Method for Stochastic Optimization*
