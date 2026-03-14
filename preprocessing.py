@@ -1,9 +1,9 @@
 """
-preprocess.py
+preprocessing.py
 ============================
-Preprocessing pipeline for USD SOFR swaption data (multi-date).
+Preprocessing pipeline for swaption data (USD SOFR / EUR ESTR).
 
-Transforms Bloomberg London Closing data — SOFR swap rates, ATM and OTM
+Transforms Bloomberg London Closing data — swap rates, ATM and OTM
 swaption IVs — into calibration-ready tensors for the Mapped Rough SABR FMM.
 
 KEY CONVENTION
@@ -15,7 +15,7 @@ performed at load time by `load_market_data()`.
 
 Data layout
 -----------
-Input files (placed in `data/` subfolder):
+Input files (placed in `dataUSD/` or `dataEUR/` subfolder):
 
     Dez2024IV.xlsx      sheets: 0912ATM, 0912OTM, 1012ATM, 1012OTM, 1112ATM, 1112OTM
     Dez2024SOFR.xlsx    sheets: 0912SOFR, 1012SOFR, 1112SOFR
@@ -24,22 +24,17 @@ Input files (placed in `data/` subfolder):
 
 Each sheet prefix (e.g. "0912") encodes the date as DDMM.
 
-Output: usd_swaption_data.pkl — a dict keyed by date string, e.g.:
-    {
-        "2024-12-09": { discount_factors, forward_term_rates, swaptions, ... },
-        "2024-12-10": { ... },
-        ...
-        "dates": ["2024-12-09", ...],
-        "metadata": { ... },
-    }
+Output: {currency}_swaption_data.pkl — a dict keyed by date string.
 
 Usage:
-    python preprocess_usd_swaptions.py
+    python preprocessing.py                # USD (default)
+    python preprocessing.py --currency eur # EUR
 """
 
 import numpy as np
 import pandas as pd
 import pickle
+import argparse
 from scipy.stats import norm
 from pathlib import Path
 from main import black_iv
@@ -58,11 +53,28 @@ THETA = 1.0
 # OTM strike offsets in basis points
 OTM_OFFSETS_BPS = [-200, -100, -50, -25, 25, 50, 100, 200]
 
-# Data directory (relative to this script)
-DATA_DIR = Path("dataUSD")
+# ---------- Per-currency configuration ----------
+
+CURRENCY_CONFIG = {
+    "usd": {
+        "data_dir": Path("dataUSD"),
+        "rate_file_suffix": "SOFR",       # e.g. Dez2024SOFR.xlsx
+        "rate_sheet_suffix": "SOFR",       # e.g. 0912SOFR
+        "output_file": "usd_swaption_data.pkl",
+        "label": "USD SOFR",
+    },
+    "eur": {
+        "data_dir": Path("dataEUR"),
+        "rate_file_suffix": "ESTR",        # Bloomberg file naming
+        "rate_sheet_suffix": "ESTR",        # Bloomberg sheet naming
+        "output_file": "eur_swaption_data.pkl",
+        "label": "EUR ESTR",
+    },
+}
 
 # Date mapping: (filename_stem, sheet_prefix) -> ISO date string
-# Sheet prefix convention: DDMM  (day-month)
+# Sheet prefix convention: DDMM (day-month)
+# Shared across currencies (same date clusters)
 DATE_MAP = [
     # December 2024 cluster
     ("Dez2024", "0912", "2024-12-09"),
@@ -447,14 +459,14 @@ def build_calibration_subsets(swaptions):
 # =============================================================================
 
 def process_single_date(iv_path, sofr_path, atm_sheet, otm_sheet, sofr_sheet,
-                        date_str, T_N=11, verbose=True):
+                        date_str, T_N=11, verbose=True, rate_label="rates"):
     """Process one date: parse, bootstrap, build swaption data."""
 
     if verbose:
         print(f"\n{'='*60}")
         print(f"  Processing {date_str}")
-        print(f"  IV:   {iv_path} → {atm_sheet}, {otm_sheet}")
-        print(f"  SOFR: {sofr_path} → {sofr_sheet}")
+        print(f"  IV:    {iv_path} → {atm_sheet}, {otm_sheet}")
+        print(f"  Rates: {sofr_path} → {sofr_sheet}")
         print(f"{'='*60}")
 
     # 1. SOFR curve
@@ -512,32 +524,47 @@ def process_single_date(iv_path, sofr_path, atm_sheet, otm_sheet, sofr_sheet,
 # =============================================================================
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Preprocess Bloomberg swaption data for calibration")
+    parser.add_argument("--currency", default="usd",
+                        choices=list(CURRENCY_CONFIG.keys()),
+                        help="Currency to process (default: usd)")
+    args = parser.parse_args()
+
+    ccfg = CURRENCY_CONFIG[args.currency]
+    data_dir = ccfg["data_dir"]
+    rate_suffix = ccfg["rate_file_suffix"]
+    sheet_suffix = ccfg["rate_sheet_suffix"]
+    output_path = ccfg["output_file"]
+    label = ccfg["label"]
+
     print("=" * 70)
-    print("USD SOFR Swaption Data Preprocessing (multi-date)")
+    print(f"{label} Swaption Data Preprocessing (multi-date)")
     print("=" * 70)
 
     all_data = {}
     dates = []
 
     for file_stem, sheet_prefix, date_str in DATE_MAP:
-        iv_path = DATA_DIR / f"{file_stem}IV.xlsx"
-        sofr_path = DATA_DIR / f"{file_stem}SOFR.xlsx"
+        iv_path = data_dir / f"{file_stem}IV.xlsx"
+        rate_path = data_dir / f"{file_stem}{rate_suffix}.xlsx"
         atm_sheet = f"{sheet_prefix}ATM"
         otm_sheet = f"{sheet_prefix}OTM"
-        sofr_sheet = f"{sheet_prefix}SOFR"
+        rate_sheet = f"{sheet_prefix}{sheet_suffix}"
 
         # Check files exist
         if not iv_path.exists():
             print(f"  WARNING: {iv_path} not found, skipping {date_str}")
             continue
-        if not sofr_path.exists():
-            print(f"  WARNING: {sofr_path} not found, skipping {date_str}")
+        if not rate_path.exists():
+            print(f"  WARNING: {rate_path} not found, skipping {date_str}")
             continue
 
         date_data = process_single_date(
-            iv_path, sofr_path,
-            atm_sheet, otm_sheet, sofr_sheet,
+            iv_path, rate_path,
+            atm_sheet, otm_sheet, rate_sheet,
             date_str, T_N=T_N, verbose=True,
+            rate_label=label,
         )
         all_data[date_str] = date_data
         dates.append(date_str)
@@ -547,6 +574,7 @@ def main():
     all_data["metadata"] = {
         "T_N": T_N,
         "theta": THETA,
+        "currency": args.currency.upper(),
         "dates": sorted(dates),
         "default_in_sample": DEFAULT_IN_SAMPLE,
         "default_out_sample": DEFAULT_OUT_SAMPLE,
@@ -555,7 +583,6 @@ def main():
     }
 
     # Save
-    output_path = "usd_swaption_data.pkl"
     with open(output_path, "wb") as f:
         pickle.dump(all_data, f)
     print(f"\nSaved to {output_path}")
@@ -564,9 +591,9 @@ def main():
     print(f"Default out-sample: {DEFAULT_OUT_SAMPLE}")
 
     # Summary
-    summary_path = "data_summary.txt"
+    summary_path = f"data_summary_{args.currency}.txt"
     with open(summary_path, "w") as f:
-        f.write("USD SOFR Swaption Data Summary (multi-date)\n")
+        f.write(f"{label} Swaption Data Summary (multi-date)\n")
         f.write(f"T_N = {T_N}, theta = {THETA}\n")
         f.write(f"All IVs are Bachelier (normal) vol, stored in decimal\n\n")
 

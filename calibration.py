@@ -32,12 +32,12 @@ from main import (
 
 CONFIG = {
     # --- Data ---
-    "data_file": "usd_swaption_data.pkl",
+    "data_file": "eur_swaption_data.pkl",
     "subset": "joint_all_smiles",
     "in_sample_date": "2024-12-09",
     "out_sample_date": "2024-12-10",
     "device": "cpu",
-    "dtype": "float32",  # "float32" for speed, "float64" for precision
+    "dtype": "float32",
 
     # --- Calibration mode ---
     #   "hybrid"            — Mode A: single-stage hybrid, H differentiable
@@ -46,7 +46,7 @@ CONFIG = {
     #   "hybrid_exact"      — Mode G: hybrid S1 → exact Cholesky S2
     #   "roughness"         — Mode E: ablation study, H free vs H = 0.5
     #   "cross"             — Mode F: train/test split cross-validation
-    "mode": "hybrid",
+    "mode": "hybrid_two_stage",
 
     "hybrid": {
         "iterations": 800,
@@ -1029,8 +1029,8 @@ def run_oos_evaluation(params, mkt_oos, cfg, diag_scheme, diag_kappa,
             lr=ft_cfg.get("lr", 5e-3),
             N_paths=ft_cfg.get("N_paths", 20_000),
             M=ft_cfg.get("M", 50),
-            scheme="hybrid",
-            hybrid_kappa=ft_cfg.get("kappa", 2),
+            scheme=diag_scheme,
+            hybrid_kappa=diag_kappa,
             variance_curve_mode="full",
             use_crn=True,
             crn_seed=cfg["crn_seed"] + 20000,

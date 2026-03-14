@@ -8,6 +8,12 @@ from scipy.stats import norm
 from scipy.special import hyp2f1 as scipy_hyp2f1
 import py_lets_be_rational as _lbr
 
+# ---------------------------------------------------------------------------
+# Global dtype — set to torch.float32 for speed, torch.float64 for precision.
+# All tensors (parameters, market data, simulation) use this consistently.
+# The exact Cholesky covariance build (2M×2M) is always done in float64 for
+# numerical stability and cast down afterwards.
+# ---------------------------------------------------------------------------
 DTYPE = torch.float32
 
 def set_dtype(dt: torch.dtype):
@@ -1822,10 +1828,23 @@ if __name__ == "__main__":
         )
 
     print("\nDone.")
-
+# ---------------------------------------------------------------------------
+# torch.compile acceleration (PyTorch 2.0+)
+# Applied after definition so older PyTorch versions still work.
+# mode="reduce-overhead" minimises kernel launch overhead in the
+# time-stepping loops, which is the main bottleneck.
+# Set TORCH_COMPILE=0 environment variable to disable.
+# Disabled on macOS: the Inductor C++ backend has known codegen bugs
+# on Apple Silicon (duplicate variable definitions in clang).
+# ---------------------------------------------------------------------------
 import os as _os
-if (hasattr(torch, "compile")
-        and _os.environ.get("TORCH_COMPILE", "1") != "0"):
+import platform as _platform
+_enable_compile = (
+    hasattr(torch, "compile")
+    and _os.environ.get("TORCH_COMPILE", "1") != "0"
+    and _platform.system() != "Darwin"
+)
+if _enable_compile:
     _compile_opts = dict(mode="reduce-overhead")
     simulate_exact = torch.compile(simulate_exact, **_compile_opts)
     simulate_approx = torch.compile(simulate_approx, **_compile_opts)
