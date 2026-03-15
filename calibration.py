@@ -32,10 +32,10 @@ from main import (
 
 CONFIG = {
     # --- Data ---
-    "data_file": "eur_swaption_data.pkl",
+    "data_file": "usd_swaption_data.pkl",
     "subset": "joint_all_smiles",
-    "in_sample_date": "2025-12-08",
-    "out_sample_date": "2025-12-09",
+    "in_sample_date": "2024-12-09",
+    "out_sample_date": "2024-12-10",
     "device": "cpu",
     "dtype": "float64",
 
@@ -270,6 +270,35 @@ def _resolve_diag_scheme(cfg):
               f"(matches calibration mode)")
         return scheme
     return raw
+
+
+def _auto_select_test_keys(all_keys):
+    """Auto-select ~5 test keys for cross-validation.
+
+    Strategy: for each expiry that has multiple tenors, hold out one
+    multi-rate swaption (preferring the middle tenor). Never selects
+    1Y-tenor swaptions since those anchor α.
+    """
+    by_expiry = {}
+    for key in all_keys:
+        exp, ten = key
+        by_expiry.setdefault(exp, []).append(key)
+
+    test_keys = []
+    for exp in sorted(by_expiry.keys()):
+        keys = by_expiry[exp]
+        # Only multi-rate candidates (tenor > 1)
+        multi = [k for k in keys if k[1] > 1]
+        if not multi:
+            continue
+        # Pick the middle tenor
+        multi.sort(key=lambda k: k[1])
+        mid = multi[len(multi) // 2]
+        test_keys.append(mid)
+
+    print(f"  Auto-selected test keys: "
+          + ", ".join(f"{k[0]:.0f}Y×{k[1]:.0f}Y" for k in test_keys))
+    return test_keys
 
 
 # =============================================================================
@@ -618,13 +647,25 @@ def run_mode_cross(params, mkt, cfg):
     Splits swaptions into train and test sets. Runs hybrid two-stage
     calibration on train keys only. Returns result with split info for
     separate train/test diagnostics.
+
+    If fewer than 3 of the configured test_keys exist in the market data
+    (e.g. EUR has a different swaption grid), test keys are selected
+    automatically: one multi-rate swaption per expiry bucket, choosing
+    the middle tenor where available.
     """
     ccfg = cfg["cross"]
 
     all_keys = sorted(mkt.swaptions.keys())
     test_keys = [k for k in ccfg["test_keys"] if k in mkt.swaptions]
+
+    if len(test_keys) < 3:
+        print(f"  Only {len(test_keys)} configured test keys found in market data.")
+        print(f"  Auto-selecting test keys from available swaptions...")
+        test_keys = _auto_select_test_keys(all_keys)
+
     train_keys = [k for k in all_keys if k not in test_keys]
 
+    # Never hold out 1Y-tenor swaptions — they anchor α
     test_1y = [k for k in test_keys if k[1] == 1]
     if test_1y:
         print(f"  Moving 1Y-tenor test keys to train: {test_1y}")
