@@ -630,6 +630,7 @@ def simulate_exact(
 
         brownian_incr = rho_eff * dW0_i + sqrt_rho * Z_indep[:, i]
         log_S = log_S - 0.5 * V_current * h + torch.sqrt(V_current) * brownian_incr
+        log_S = torch.clamp(log_S, min=-20.0, max=20.0)
 
         correction = eta_sq / 2.0 * t_next ** two_H
         V_next = v0 * torch.exp(eta * sqrt_2H * fBm_next - correction)
@@ -682,6 +683,7 @@ def simulate_approx(
 
         brownian_incr = rho_eff * dW0[:, i] + sqrt_rho * dW_perp[:, i]
         log_S = log_S - 0.5 * V_current * h + torch.sqrt(V_current) * brownian_incr
+        log_S = torch.clamp(log_S, min=-20.0, max=20.0)
 
         lags = h * (i + 1 - torch.arange(0, i + 1, dtype=DTYPE, device=device))
         kernels = lags ** (H - 0.5)
@@ -839,6 +841,7 @@ def simulate_hybrid(
 
         brownian_incr = rho_eff * dW0[:, i] + sqrt_rho * dW_perp[:, i]
         log_S = log_S - 0.5 * V_current * h + torch.sqrt(V_current) * brownian_incr
+        log_S = torch.clamp(log_S, min=-20.0, max=20.0)
 
         fBm_val = torch.zeros(N_paths, dtype=DTYPE, device=device)
 
@@ -927,6 +930,7 @@ def simulate_sabr(
         # --- Step 1: Price update using LEFT-endpoint variance ---
         brownian_incr = rho_eff * dW0[:, i] + sqrt_rho * dWperp[:, i]
         log_S = log_S - 0.5 * V_current * h + torch.sqrt(V_current) * brownian_incr
+        log_S = torch.clamp(log_S, min=-20.0, max=20.0)
 
         # --- Step 2: Variance at next time step ---
         # V_{t_{i+1}} = v0 · exp(η · W⁰_{t_{i+1}} − η²/2 · t_{i+1})
@@ -1828,15 +1832,7 @@ if __name__ == "__main__":
         )
 
     print("\nDone.")
-# ---------------------------------------------------------------------------
-# torch.compile acceleration (PyTorch 2.0+)
-# Applied after definition so older PyTorch versions still work.
-# mode="reduce-overhead" minimises kernel launch overhead in the
-# time-stepping loops, which is the main bottleneck.
-# Set TORCH_COMPILE=0 environment variable to disable.
-# Disabled on macOS: the Inductor C++ backend has known codegen bugs
-# on Apple Silicon (duplicate variable definitions in clang).
-# ---------------------------------------------------------------------------
+    
 import os as _os
 import platform as _platform
 _enable_compile = (

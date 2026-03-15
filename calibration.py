@@ -34,8 +34,8 @@ CONFIG = {
     # --- Data ---
     "data_file": "eur_swaption_data.pkl",
     "subset": "joint_all_smiles",
-    "in_sample_date": "2024-12-09",
-    "out_sample_date": "2024-12-10",
+    "in_sample_date": "2025-12-08",
+    "out_sample_date": "2025-12-09",
     "device": "cpu",
     "dtype": "float64",
 
@@ -1837,14 +1837,6 @@ if __name__ == "__main__":
     )
     print_market_summary(mkt)
 
-    # --- Choose eta_init based on rate level ---
-    # EUR rates (~2%) produce α values ~60% larger than USD (~4%).
-    # eta_init=2.0 overflows the hybrid Cholesky for EUR; 1.5 is safe.
-    # The optimiser pushes η to wherever it needs to be.
-    _avg_rate = float(mkt.R[1:mkt.N+1].mean())
-    _eta_init = 1.5 if _avg_rate < 0.03 else 2.0
-    print(f"  eta_init: {_eta_init} (avg forward rate = {_avg_rate*100:.2f}%)")
-
     if mode == "roughness":
         H_values = cfg["roughness"]["H_values"]
         print("\n" + "=" * 72)
@@ -2009,7 +2001,7 @@ if __name__ == "__main__":
         print("# INITIALISATION")
         print("#" * 60)
 
-        params = initialise_params(mkt, H_init=0.10, eta_init=_eta_init)
+        params = initialise_params(mkt, H_init=0.10, eta_init=2.0)
 
         print("\n" + "#" * 60)
         print("# AMCC CALIBRATION (train set only)")
@@ -2077,7 +2069,7 @@ if __name__ == "__main__":
         print("# INITIALISATION")
         print("#" * 60)
 
-        params = initialise_params(mkt, H_init=0.10, eta_init=_eta_init)
+        params = initialise_params(mkt, H_init=0.10, eta_init=2.0)
 
         print("\n" + "#" * 60)
         print("# AMCC CALIBRATION")
