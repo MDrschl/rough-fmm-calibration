@@ -715,7 +715,7 @@ def build_hybrid_covariance(
     kappa: int,
     device: str = "cpu",
 ) -> torch.Tensor:
-    """Build the (κ+1)×(κ+1) covariance matrix Σ for the BLP hybrid scheme.
+    """Build the (κ+1)×(κ+1) covariance matrix Σ for the hybrid scheme.
     
     Always computed in float64 for Cholesky numerical stability.
     """
@@ -761,7 +761,7 @@ def compute_bstar_weights(
     M: int,
     device: str = "cpu",
 ) -> torch.Tensor:
-    """Compute optimal far-field kernel weights for the BLP hybrid scheme."""
+    """Compute optimal far-field kernel weights for the hybrid scheme."""
     h_t = torch.tensor(h, dtype=DTYPE, device=device)
     alpha1 = alpha + 1.0
     weights = torch.zeros(M, dtype=DTYPE, device=device)
@@ -789,7 +789,7 @@ def simulate_hybrid(
     kappa: int = 2,
     antithetic: bool = False,
 ) -> torch.Tensor:
-    """Layer 4 (BLP hybrid scheme): Simulate S*_T with H fully differentiable."""
+    """Layer 4 (hybrid scheme): Simulate S*_T with H fully differentiable."""
     h = T / M
     device = S0.device
     alpha = H - 0.5
@@ -810,7 +810,7 @@ def simulate_hybrid(
             jitter *= 100
     if L_near is None:
         raise RuntimeError(
-            f"BLP hybrid Cholesky failed after 5 attempts "
+            f"hybrid Cholesky failed after 5 attempts "
             f"(α={alpha.item():.4f}, h={h:.6f}, κ={kappa})"
         )
     # Cast to working dtype after stable factorisation
@@ -887,7 +887,7 @@ def simulate_sabr(
         V_t = v(t) · exp(η · W⁰_t − η²t/2)
 
     where κ = η√(2H) = η at H = 1/2.  No Cholesky factorisation or
-    BLP decomposition is needed — just cumulative sums of i.i.d. normals.
+    hybrid decomposition is needed — just cumulative sums of i.i.d. normals.
 
     Args:
         S0, v0, eta, rho_eff: effective parameters from Layer 3
@@ -1771,7 +1771,7 @@ if __name__ == "__main__":
             print(f"  {name:20s}: grad = None  ✗")
 
     print("\n" + "=" * 60)
-    print("Gradient flow: Layers 0→6 (BLP hybrid scheme, κ=2)")
+    print("Gradient flow: Layers 0→6 (hybrid scheme, κ=2)")
     print("=" * 60)
 
     params.zero_grad()
@@ -1832,7 +1832,7 @@ if __name__ == "__main__":
         )
 
     print("\nDone.")
-    
+
 import os as _os
 import platform as _platform
 _enable_compile = (

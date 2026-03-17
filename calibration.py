@@ -451,11 +451,11 @@ def initialise_h05(mkt, eta_init=2.0):
 
 def _run_hybrid_stage(params, mkt, cfg, scfg, *,
                       freeze_H=False, crn_offset=0, label=""):
-    """Run a single hybrid BLP calibration stage."""
+    """Run a single hybrid calibration stage."""
     print(f"\n{'=' * 60}")
     h_status = (f"H frozen at {params.get_H().item():.4f}"
                 if freeze_H else "H differentiable")
-    print(f"{label}: Hybrid BLP (κ={scfg['kappa']}), {h_status}")
+    print(f"{label}: Hybrid (κ={scfg['kappa']}), {h_status}")
     print("=" * 60)
     print(f"  {scfg['iterations']} iterations, {scfg['N_paths']:,} paths, "
           f"{scfg['M']} steps, lr={scfg['lr']}")
@@ -550,7 +550,7 @@ def run_mode_hybrid_two_stage(params, mkt, cfg):
 def run_mode_hybrid_exact(params, mkt, cfg):
     """Hybrid → Exact two-stage calibration.
 
-    Stage 1: Hybrid BLP scheme with H differentiable.
+    Stage 1: Hybrid scheme with H differentiable.
     Stage 2: Exact Cholesky scheme with H frozen.
     """
     gecfg = cfg["hybrid_exact"]
@@ -1675,7 +1675,7 @@ def save_plots(params, mkt, history, config, history2=None, test_keys=None):
         losses = [r["loss"] for r in history]
         lrs = [r["lr"] for r in history]
 
-        ax1.semilogy(steps, losses, "b-", alpha=0.7, label="Hybrid (BLP)")
+        ax1.semilogy(steps, losses, "b-", alpha=0.7, label="Hybrid")
         ax1.set_title("Calibration convergence (hybrid)")
         ax1.legend()
 

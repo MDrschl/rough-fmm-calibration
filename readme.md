@@ -135,9 +135,9 @@ CONFIG = {
 
 | Mode | Description |
 |------|-------------|
-| `hybrid` | Single-stage hybrid BLP, all parameters free, full variance curve |
+| `hybrid` | Single-stage hybrid, all parameters free, full variance curve |
 | `hybrid_two_stage` | **Primary.** Stage 1: simplified variance curve, $H$ free. Stage 2: full variance curve, $H$ frozen |
-| `hybrid_exact` | Stage 1: hybrid BLP. Stage 2: exact Cholesky ($H$ frozen, not differentiable) |
+| `hybrid_exact` | Stage 1: hybrid. Stage 2: exact Cholesky ($H$ frozen, not differentiable) |
 | `two_stage` | Stage 1: approximate kernel. Stage 2: exact Cholesky |
 | `cross` | Train/test split cross-validation (USD: 13 train / 6 held-out; EUR: auto-selected ~11 train / 5 held-out) |
 | `roughness` | Ablation study: re-calibrate at fixed $H \in \{0.05, 0.10, \ldots, 0.50\}$ |

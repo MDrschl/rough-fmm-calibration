@@ -96,3 +96,31 @@ STAGE 1: Hybrid BLP (κ=2), H differentiable
   [  20/400]  loss=2.197079  RMSE_IV=12.375%  H=0.1028  η=2.0304  κ=0.9206  lr=3.50e-03
 /Users/MaximilianDroschl/.pyenv/versions/3.12.9/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:198: UserWarning: The epoch parameter in `scheduler.step()` was not necessary and is being deprecated where possible. Please use `scheduler.step()` to step the scheduler. During the deprecation, if epoch is different from None, the closed form is used instead of the new chainable form, where available. Please open an issue if you are unable to replicate your use case: https://github.com/pytorch/pytorch/issues/new/choose.
   warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
+  [  40/400]  loss=1.550322  RMSE_IV=10.165%  H=0.1093  η=2.1100  κ=0.9865  lr=4.64e-03
+  [  60/400]  loss=0.930504  RMSE_IV=7.713%  H=0.1132  η=2.1873  κ=1.0408  lr=4.04e-03
+  [  80/400]  loss=0.498746  RMSE_IV=5.568%  H=0.1139  η=2.2538  κ=1.0755  lr=3.48e-03
+  [ 100/400]  loss=0.240712  RMSE_IV=3.817%  H=0.1120  η=2.3059  κ=1.0912  lr=2.98e-03
+  [ 120/400]  loss=0.121730  RMSE_IV=2.672%  H=0.1104  η=2.3392  κ=1.0990  lr=2.53e-03
+  [ 140/400]  loss=0.082130  RMSE_IV=2.175%  H=0.1089  η=2.3556  κ=1.0995  lr=2.13e-03
+  [ 160/400]  loss=0.058485  RMSE_IV=1.817%  H=0.1077  η=2.3630  κ=1.0968  lr=1.77e-03
+  [ 180/400]  loss=0.054641  RMSE_IV=1.734%  H=0.1066  η=2.3652  κ=1.0923  lr=1.44e-03
+  [ 200/400]  loss=0.050727  RMSE_IV=1.671%  H=0.1055  η=2.3645  κ=1.0864  lr=1.16e-03
+  [ 220/400]  loss=0.043648  RMSE_IV=1.552%  H=0.1044  η=2.3623  κ=1.0795  lr=9.16e-04
+  [ 240/400]  loss=0.041951  RMSE_IV=1.521%  H=0.1038  η=2.3618  κ=1.0760  lr=7.05e-04
+  [ 260/400]  loss=0.033798  RMSE_IV=1.352%  H=0.1033  η=2.3611  κ=1.0734  lr=5.25e-04
+  [ 280/400]  loss=0.040275  RMSE_IV=1.483%  H=0.1031  η=2.3603  κ=1.0717  lr=3.75e-04
+  [ 300/400]  loss=0.035939  RMSE_IV=1.402%  H=0.1028  η=2.3596  κ=1.0701  lr=2.53e-04
+  [ 320/400]  loss=0.037421  RMSE_IV=1.421%  H=0.1027  η=2.3591  κ=1.0692  lr=1.57e-04
+  [ 340/400]  loss=0.035192  RMSE_IV=1.368%  H=0.1026  η=2.3589  κ=1.0686  lr=8.59e-05
+  [ 360/400]  loss=0.037804  RMSE_IV=1.433%  H=0.1026  η=2.3588  κ=1.0684  lr=3.71e-05
+  [ 380/400]  loss=0.034180  RMSE_IV=1.366%  H=0.1025  η=2.3588  κ=1.0682  lr=9.34e-06
+  [ 399/400]  loss=0.036903  RMSE_IV=1.412%  H=0.1025  η=2.3588  κ=1.0682  lr=1.00e-06
+
+STAGE 1 complete. H = 0.1026, η = 2.3589, κ = 1.0686
+
+============================================================
+STAGE 2: Hybrid BLP (κ=2), H frozen at 0.1026
+============================================================
+  600 iterations, 30,000 paths, 100 steps, lr=0.001
+  [   0/600]  loss=0.048809  RMSE_IV=1.594%  H=0.1026  η=2.3589  κ=1.0686  lr=3.43e-05
+  [  20/600]  loss=0.052818  RMSE_IV=1.684%  H=0.1026  η=2.3530  κ=1.0659  lr=7.00e-04
