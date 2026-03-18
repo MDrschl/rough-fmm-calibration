@@ -246,18 +246,6 @@ print(f"α = {results['alpha']}")
 
 ---
 
-## Forward variance curves
-
-**Simplified** (Stage 1):
-$$\xi_j(t) = \alpha_j^2 \exp\!\left(\frac{\kappa^2 t^{2H}}{8H}\right)$$
-
-**Full** (Stage 2):
-$$\xi_j(t) = \alpha_j^2 \exp\!\left\{\frac{\kappa^2 t^{2H}}{8H} - \sum_{i=j+1}^{N} \frac{\theta_i R_0^i}{1+\theta_i R_0^i}\,\alpha_i\,\rho_{0,i}\,\kappa \int_0^t (t{-}s)^{H-1/2}\gamma_i(s)\,\mathrm{d}s \right\}$$
-
-The full curve lies strictly above the simplified one ($\rho_{0,i} \leq 0$). When Stage 2 activates the full curve, $\alpha$ self-corrects via gradient descent.
-
----
-
 ## References
 
 - Adachi, R., Fukasawa, M., Iida, N., Ikeda, M., Nakatsu, Y., Tsurumi, R. & Yamakami, T. (2025). *Rough SABR Forward Market Model*.
