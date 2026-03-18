@@ -170,10 +170,10 @@ All parameters except $\alpha$ are frozen at calibrated values. $\alpha$ is fine
 
 ```bash
 # Preview all 20 runs
-python run_all_calibrations.py --device cuda --dtype float64 --dry-run
+python run_all_calibrations.py --device cpu --dtype float64 --dry-run
 
 # Generate and run
-python run_all_calibrations.py --device cuda --dtype float64
+python run_all_calibrations.py --device cpu --dtype float64
 PYTHONPATH=. PYTHONUNBUFFERED=1 bash run_all.sh
 ```
 
