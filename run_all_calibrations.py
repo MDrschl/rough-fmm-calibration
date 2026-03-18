@@ -1,10 +1,11 @@
+#!/usr/bin/env python3
 """
 run_all_calibrations.py
 ========================
 Master script for the full calibration analysis.
 
 Phase 1: Mode comparison
-    Compare hybrid, hybrid_two_stage, hybrid_exact, two_stage
+    Compare hybrid_two_stage, hybrid_exact, two_stage, hybrid
     across USD and EUR, training on 2024-12-09 / 2025-12-08,
     with OOS on the following day.
 
@@ -16,8 +17,10 @@ Phase 2: Deep analysis with best mode (hybrid_two_stage)
     evaluate on 2024-12-10/2025-12-09.
 
 Usage:
-    python run_all_calibrations.py [--device cuda] [--phase 1|2|all]
+    python run_all_calibrations.py [--device cuda] [--dtype float64]
+                                   [--phase 1|2|all]
                                    [--dry-run] [--currency usd|eur|both]
+    PYTHONPATH=. PYTHONUNBUFFERED=1 bash run_all.sh
 
 Outputs saved to results/{currency}/{phase}/{mode}/{date}/
 Each run directory contains:
@@ -57,7 +60,7 @@ CURRENCIES = {
     },
 }
 
-COMPARISON_MODES = ["hybrid_two_stage", "hybrid_exact", "two_stage"]
+COMPARISON_MODES = ["hybrid_two_stage","hybrid", "hybrid_exact", "two_stage"]
 BEST_MODE = "hybrid_two_stage"
 
 # Time estimates per mode in minutes (GPU / CPU)
