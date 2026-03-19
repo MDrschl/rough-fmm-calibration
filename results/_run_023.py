@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Auto-generated driver: P1 | EUR | two_stage            | 2024-12-09 → 2024-12-10"""
+"""Auto-generated driver: P2 | EUR | cross                | 2024-12-09"""
 import sys, os, shutil, json
 
 # Work from the code directory (one level up from results/)
@@ -11,7 +11,7 @@ patch = {
   "out_sample_date": "2024-12-10",
   "device": "cpu",
   "dtype": "float64",
-  "mode": "two_stage"
+  "mode": "cross"
 }
 
 # Patch CONFIG before __main__ executes

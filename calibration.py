@@ -225,6 +225,14 @@ CONFIG = {
     "diag_hybrid_kappa": 2,
 }
 
+# --- Override CONFIG from JSON file (used by run_all_calibrations.py) ---
+import json as _json
+from pathlib import Path as _Path
+_override = _Path("_config_override.json")
+if _override.exists():
+    with open(_override) as _f:
+        CONFIG.update(_json.load(_f))
+
 
 # =============================================================================
 # Helpers

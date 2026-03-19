@@ -14,11 +14,14 @@ patch = {
   "mode": "hybrid_two_stage"
 }
 
-# Patch CONFIG before __main__ executes
-import calibration
-for k, v in patch.items():
-    if k in calibration.CONFIG:
-        calibration.CONFIG[k] = v
+# Write config override file (calibration.py reads this at startup)
+with open('_config_override.json', 'w') as _f:
+    json.dump(patch, _f, indent=2)
 
-# Run by re-executing the module
-exec(compile(open('calibration.py').read(), 'calibration.py', 'exec'))
+# Run calibration (picks up _config_override.json automatically)
+try:
+    exec(compile(open('calibration.py').read(), 'calibration.py', 'exec'))
+finally:
+    # Clean up override file
+    if os.path.exists('_config_override.json'):
+        os.remove('_config_override.json')

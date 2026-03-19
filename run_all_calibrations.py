@@ -5,7 +5,7 @@ run_all_calibrations.py
 Master script for the full calibration analysis.
 
 Phase 1: Mode comparison
-    Compare hybrid_two_stage, hybrid_exact, two_stage, hybrid
+    Compare hybrid, hybrid_two_stage, hybrid_exact, two_stage
     across USD and EUR, training on 2024-12-09 / 2025-12-08,
     with OOS on the following day.
 
@@ -17,10 +17,8 @@ Phase 2: Deep analysis with best mode (hybrid_two_stage)
     evaluate on 2024-12-10/2025-12-09.
 
 Usage:
-    python run_all_calibrations.py [--device cuda] [--dtype float64]
-                                   [--phase 1|2|all]
+    python run_all_calibrations.py [--device cuda] [--phase 1|2|all]
                                    [--dry-run] [--currency usd|eur|both]
-    PYTHONPATH=. PYTHONUNBUFFERED=1 bash run_all.sh
 
 Outputs saved to results/{currency}/{phase}/{mode}/{date}/
 Each run directory contains:
@@ -60,7 +58,7 @@ CURRENCIES = {
     },
 }
 
-COMPARISON_MODES = ["hybrid_two_stage","hybrid", "hybrid_exact", "two_stage"]
+COMPARISON_MODES = ["hybrid_two_stage"]
 BEST_MODE = "hybrid_two_stage"
 
 # Time estimates per mode in minutes (GPU / CPU)
@@ -112,14 +110,17 @@ def generate_driver(run, results_dir):
     lines += [
         f"patch = {json.dumps(patch, indent=2)}",
         "",
-        "# Patch CONFIG before __main__ executes",
-        "import calibration",
-        "for k, v in patch.items():",
-        "    if k in calibration.CONFIG:",
-        "        calibration.CONFIG[k] = v",
+        "# Write config override file (calibration.py reads this at startup)",
+        "with open('_config_override.json', 'w') as _f:",
+        "    json.dump(patch, _f, indent=2)",
         "",
-        "# Run by re-executing the module",
-        "exec(compile(open('calibration.py').read(), 'calibration.py', 'exec'))",
+        "# Run calibration (picks up _config_override.json automatically)",
+        "try:",
+        "    exec(compile(open('calibration.py').read(), 'calibration.py', 'exec'))",
+        "finally:",
+        "    # Clean up override file",
+        "    if os.path.exists('_config_override.json'):",
+        "        os.remove('_config_override.json')",
     ]
 
     driver_path = results_dir / f"_run_{idx:03d}.py"
