@@ -169,42 +169,47 @@ All parameters except $\alpha$ are frozen at calibrated values. $\alpha$ is fine
 ## Full analysis
 
 ```bash
-# Preview all 20 runs
+# Preview all 24 runs
 python run_all_calibrations.py --device cpu --dtype float64 --dry-run
 
-# Generate and run
+# Generate driver scripts, then execute
 python run_all_calibrations.py --device cpu --dtype float64
-PYTHONPATH=. PYTHONUNBUFFERED=1 bash run_all.sh
+PYTHONPATH=. PYTHONUNBUFFERED=1 caffeinate -dims bash run_all.sh
 ```
 
-`PYTHONPATH=.` is required for the generated driver scripts. `PYTHONUNBUFFERED=1` enables real-time log output.
+`PYTHONPATH=.` is required for the generated driver scripts. `PYTHONUNBUFFERED=1` enables real-time log output. `caffeinate -dims` prevents macOS from sleeping during the run.
 
 ### Selective runs
 
 ```bash
+# USD only
+python run_all_calibrations.py --device cpu --dtype float64 --currency usd
+PYTHONPATH=. PYTHONUNBUFFERED=1 caffeinate -dims bash run_all.sh
+
+# Phase 1 only, USD only
 python run_all_calibrations.py --device cpu --dtype float64 --phase 1 --currency usd
-PYTHONPATH=. bash run_all.sh
+PYTHONPATH=. PYTHONUNBUFFERED=1 caffeinate -dims bash run_all.sh
 
 # Individual run
 PYTHONPATH=. python results/_run_001.py
 ```
 
-### Phase 1: Mode comparison (12 runs)
-- 3 modes × 2 dates × 2 currencies
+### Phase 1: Mode comparison (16 runs)
+- 4 modes × 2 dates × 2 currencies
 - Compares IS RMSE, OOS RMSE, wall time, calibrated parameters
 
 ### Phase 2: Deep analysis (8 runs)
 - 4 roughness ablations (requires Phase 1 base results)
 - 4 cross-validations
 
-**Total: 20 runs.** Estimated ~13 hrs on GPU, ~76 hrs on CPU.
+**Total: 24 runs.** Estimated ~14 hrs on GPU, ~86 hrs on CPU.
 
 ### Output structure
 
 ```
 results/
   usd/
-    phase1_modes/{hybrid_two_stage,hybrid_exact,two_stage}/{2024-12-09,2025-12-08}/
+    phase1_modes/{hybrid_two_stage,hybrid,hybrid_exact,two_stage}/{2024-12-09,2025-12-08}/
     phase2_roughness/roughness/{2024-12-09,2025-12-08}/
     phase2_cross/cross/{2024-12-09,2025-12-08}/
   eur/
