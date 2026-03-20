@@ -1,8 +1,0 @@
-{
-  "data_file": "usd_swaption_data.pkl",
-  "in_sample_date": "2024-12-09",
-  "out_sample_date": "2024-12-10",
-  "device": "cpu",
-  "dtype": "float64",
-  "mode": "roughness"
-}

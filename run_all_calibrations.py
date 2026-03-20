@@ -58,7 +58,7 @@ CURRENCIES = {
     },
 }
 
-COMPARISON_MODES = ["hybrid_two_stage"]
+COMPARISON_MODES = ["hybrid_two_stage", "hybrid", "hybrid_exact", "two_stage"]
 BEST_MODE = "hybrid_two_stage"
 
 # Time estimates per mode in minutes (GPU / CPU)
