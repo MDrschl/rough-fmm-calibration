@@ -1,0 +1,103 @@
+  dtype: torch.float64
+Loading market data...
+  Date: 2025-12-08
+============================================================
+Market Data Summary
+============================================================
+N = 11 (annual grid T_0=0,...,T_11)
+Device: cpu
+Swaptions: 19
+(I,J) groups: 19
+
+Discount factors:
+  P(T_0) = 1.000000
+  P(T_1) = 0.965870    R_1 = 3.534%
+  P(T_2) = 0.935727    R_2 = 3.221%
+  P(T_3) = 0.905377    R_3 = 3.352%
+  P(T_4) = 0.874748    R_4 = 3.501%
+  P(T_5) = 0.843834    R_5 = 3.663%
+  P(T_6) = 0.812612    R_6 = 3.842%
+  P(T_7) = 0.781352    R_7 = 4.001%
+  P(T_8) = 0.750263    R_8 = 4.144%
+  P(T_9) = 0.719482    R_9 = 4.278%
+  P(T_10) = 0.689090    R_10 = 4.410%
+  P(T_11) = 0.659375    R_11 = 4.506%
+
+         Key   I   J    S0(%)   ATM IV   #K   sum(pi)
+------------------------------------------------------------
+  1Y x 1Y   1   2    3.221   25.18%    9    1.0000
+  1Y x 2Y   1   3    3.286   25.59%    9    0.9997
+  1Y x 3Y   1   4    3.355   25.13%    9    0.9991
+  1Y x 5Y   1   6    3.505   24.07%    9    0.9969
+  1Y x 7Y   1   8    3.652   22.87%    9    0.9938
+  1Y x 10Y   1  11    3.845   21.49%    9    0.9880
+  3Y x 1Y   3   4    3.501   25.05%    9    1.0000
+  3Y x 2Y   3   5    3.581   24.35%    9    0.9996
+  3Y x 3Y   3   6    3.665   23.77%    9    0.9989
+  3Y x 5Y   3   8    3.818   22.65%    9    0.9968
+  3Y x 7Y   3  10    3.953   21.61%    9    0.9940
+  5Y x 1Y   5   6    3.842   23.14%    9    1.0000
+  5Y x 2Y   5   7    3.920   22.55%    9    0.9996
+  5Y x 3Y   5   8    3.992   22.00%    9    0.9990
+  5Y x 5Y   5  10    4.123   21.13%    9    0.9972
+  7Y x 1Y   7   8    4.144   21.29%    9    1.0000
+  7Y x 2Y   7   9    4.210   20.91%    9    0.9997
+  7Y x 3Y   7  10    4.274   20.47%    9    0.9991
+  10Y x 1Y  10  11    4.506   19.38%    9    1.0000
+
+############################################################
+# INITIALISATION
+############################################################
+
+  Pass 1 — 1Y-tenor ATM matching:
+    Matched rate indices (0-based): [1, 3, 5, 7, 10]
+    α at matched: α[1]=0.1652, α[3]=0.1480, α[5]=0.1291, α[7]=0.1140, α[10]=0.0990
+  Pass 2 — interpolation for unmatched indices: [0, 2, 4, 6, 8, 9]
+    α after interpolation: α[0]=0.1652, α[2]=0.1566, α[4]=0.1385, α[6]=0.1215, α[8]=0.1090, α[9]=0.1040
+    α final: [0.1652, 0.1652, 0.1566, 0.1480, 0.1385, 0.1291, 0.1215, 0.1140, 0.1090, 0.1040, 0.0990]
+
+  Initialised parameters:
+    H     = 0.1000
+    η     = 2.0000
+    α     = [0.1652, 0.1652, 0.1566, 0.1480, 0.1385, 0.1291, 0.1215, 0.1140, 0.1090, 0.1040, 0.0990]
+    ρ₀    = [-0.500, -0.500, -0.500, -0.500, -0.500, -0.500, -0.500, -0.500, -0.500, -0.500, -0.500]
+
+  ATM verification (formula: σ_ATM ≈ √v̄, overestimates at high η due to Jensen):
+    1Y× 1Y: √v̄=25.18%  mkt=25.18%  diff=+0.00%  (√v₀=16.52%, G=2.323)  [matched]
+    1Y× 2Y: √v̄=19.38%  mkt=25.59%  diff=-6.21%  (√v₀=12.72%, G=2.323)  [multi-rate]
+    1Y× 3Y: √v̄=16.86%  mkt=25.13%  diff=-8.27%  (√v₀=11.07%, G=2.323)  [multi-rate]
+    1Y× 5Y: √v̄=14.17%  mkt=24.07%  diff=-9.89%  (√v₀=9.30%, G=2.323)  [multi-rate]
+    1Y× 7Y: √v̄=12.59%  mkt=22.87%  diff=-10.28%  (√v₀=8.26%, G=2.323)  [multi-rate]
+    1Y×10Y: √v̄=11.07%  mkt=21.49%  diff=-10.42%  (√v₀=7.26%, G=2.323)  [multi-rate]
+    3Y× 1Y: √v̄=25.05%  mkt=25.05%  diff=-0.00%  (√v₀=14.80%, G=2.865)  [matched]
+    3Y× 2Y: √v̄=19.16%  mkt=24.35%  diff=-5.18%  (√v₀=11.32%, G=2.865)  [multi-rate]
+    3Y× 3Y: √v̄=16.57%  mkt=23.77%  diff=-7.21%  (√v₀=9.79%, G=2.865)  [multi-rate]
+    3Y× 5Y: √v̄=13.91%  mkt=22.65%  diff=-8.74%  (√v₀=8.22%, G=2.865)  [multi-rate]
+    3Y× 7Y: √v̄=12.44%  mkt=21.61%  diff=-9.17%  (√v₀=7.35%, G=2.865)  [multi-rate]
+    5Y× 1Y: √v̄=23.14%  mkt=23.14%  diff=+0.00%  (√v₀=12.91%, G=3.213)  [matched]
+    5Y× 2Y: √v̄=17.76%  mkt=22.55%  diff=-4.79%  (√v₀=9.91%, G=3.213)  [multi-rate]
+    5Y× 3Y: √v̄=15.40%  mkt=22.00%  diff=-6.59%  (√v₀=8.59%, G=3.213)  [multi-rate]
+    5Y× 5Y: √v̄=13.09%  mkt=21.13%  diff=-8.04%  (√v₀=7.30%, G=3.213)  [multi-rate]
+    7Y× 1Y: √v̄=21.29%  mkt=21.29%  diff=-0.00%  (√v₀=11.40%, G=3.489)  [matched]
+    7Y× 2Y: √v̄=16.46%  mkt=20.91%  diff=-4.45%  (√v₀=8.81%, G=3.489)  [multi-rate]
+    7Y× 3Y: √v̄=14.40%  mkt=20.47%  diff=-6.08%  (√v₀=7.71%, G=3.489)  [multi-rate]
+    10Y× 1Y: √v̄=19.38%  mkt=19.38%  diff=+0.00%  (√v₀=9.90%, G=3.833)  [matched]
+
+############################################################
+# AMCC CALIBRATION
+############################################################
+
+============================================================
+HYBRID: Hybrid (κ=2), H differentiable
+============================================================
+  800 iterations, 30,000 paths, 100 steps, lr=0.003
+  H_lr_factor=1.5, grad_clip_norm=1.0
+  [   0/800]  loss=1.421311  RMSE_IV=10.336%  H=0.1000  η=2.0000  κ=0.8944  lr=6.10e-05
+  [  20/800]  loss=1.369902  RMSE_IV=10.109%  H=0.1010  η=2.0109  κ=0.9038  lr=1.26e-03
+  [  40/800]  loss=1.201113  RMSE_IV=9.381%  H=0.1038  η=2.0428  κ=0.9310  lr=2.46e-03
+/Users/MaximilianDroschl/.pyenv/versions/3.12.9/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:198: UserWarning: The epoch parameter in `scheduler.step()` was not necessary and is being deprecated where possible. Please use `scheduler.step()` to step the scheduler. During the deprecation, if epoch is different from None, the closed form is used instead of the new chainable form, where available. Please open an issue if you are unable to replicate your use case: https://github.com/pytorch/pytorch/issues/new/choose.
+  warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
+  [  60/800]  loss=0.945430  RMSE_IV=8.198%  H=0.1077  η=2.0928  κ=0.9712  lr=2.89e-03
+  [  80/800]  loss=0.669641  RMSE_IV=6.764%  H=0.1104  η=2.1426  κ=1.0066  lr=2.70e-03
+  [ 100/800]  loss=0.454917  RMSE_IV=5.490%  H=0.1115  η=2.1879  κ=1.0332  lr=2.52e-03
+  [ 120/800]  loss=0.300987  RMSE_IV=4.415%  H=0.1115  η=2.2260  κ=1.0512  lr=2.35e-03
