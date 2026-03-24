@@ -2,7 +2,7 @@
 
 This repository implements the calibration of the **Mapped Rough SABR Forward Market Model** to swaption surfaces via **Automatic Monte Carlo Calibration (AMCC)**. It extends the AMCC framework of [Gonon & Stockinger (2025)](https://doi.org/10.1145/3677052.3698605) from the single-asset equity setting to the multi-rate interest rate setting of the Rough SABR FMM proposed by [Adachi et al. (2025)](https://arxiv.org/abs/2509.25975). To our knowledge, this is the first application of AMCC to a rough stochastic volatility forward market model.
 
-The entire pricing pipeline — from unconstrained parameters through FMM aggregation, Monte Carlo simulation, and swaption pricing — is embedded in a single differentiable computational graph in PyTorch. Gradients of the vega-weighted calibration loss flow back through the aggregation into all 79 model parameters in a single backward pass, replacing the gradient-free optimisation and nested Brent root-finding of the original implementation with an estimated speedup of approximately three orders of magnitude.
+The entire pricing pipeline — from unconstrained parameters through FMM aggregation, Monte Carlo simulation, and swaption pricing — is embedded in a single differentiable computational graph in PyTorch. Gradients of the vega-weighted calibration loss flow back through the aggregation into all 79 model parameters in a single backward pass. Reverse-mode automatic differentiation obtains the full gradient in a single forward-backward pass, whereas a finite-difference approximation would require $\mathcal{O}(n)$ forward passes, reducing the per-iteration cost by roughly two orders of magnitude for the $n = 79$ parameter model.
 
 ---
 
@@ -141,14 +141,62 @@ Three schemes for the fractional Brownian motion, each at a different point in t
 
 ### Calibration modes
 
+All modes optimise the same 79-parameter model via AMCC. They differ in which fBm simulation scheme is used in each stage, whether $H$ is free or frozen, and which forward variance curve is active.
+
+#### Hybrid two-stage (`hybrid_two_stage`) — recommended
+
+| | Stage 1 | Stage 2 |
+|--|---------|---------|
+| **fBm scheme** | Hybrid | Hybrid |
+| **$H$ status** | Free (differentiable) | Frozen at Stage 1 value |
+| **Variance curve** | Simplified: $\xi_j(t) = \alpha_j^2 \exp(\eta^2 t^{2H}/4)$ | Full: includes Volterra–gamma drift corrections |
+| **Paths / steps** | 20,000 / 50 | 30,000 / 100 |
+| **Iterations** | 400 | 600 |
+
+Stage 1 locates the roughness regime $(H, \eta)$ jointly with all other parameters at lower resolution and under the cheaper simplified variance curve. Stage 2 refines $\eta$, $\alpha$, $\rho_0$, and $\rho_{ij}$ under the full variance curve at higher path count, with $H$ frozen. The two-stage structure reduces total computation time compared to the single-stage mode by reserving the expensive full-curve evaluation for Stage 2, which starts from a well-initialised parameter set and converges more quickly.
+
+#### Hybrid single-stage (`hybrid`)
+
+| | Single stage |
+|--|-------------|
+| **fBm scheme** | Hybrid |
+| **$H$ status** | Free (differentiable) |
+| **Variance curve** | Full |
+| **Paths / steps** | 30,000 / 100 |
+| **Iterations** | 800 |
+
+All 79 parameters are optimised jointly in one run with no stage separation. Simpler but slower to converge, because the expensive full variance curve is evaluated from the start, including during the early high-loss phase where precision matters less than speed.
+
+#### Hybrid–exact (`hybrid_exact`)
+
+| | Stage 1 | Stage 2 |
+|--|---------|---------|
+| **fBm scheme** | Hybrid | Exact Cholesky |
+| **$H$ status** | Free (differentiable) | Frozen at Stage 1 value |
+| **Variance curve** | Simplified | Full |
+| **Paths / steps** | 20,000 / 50 | 30,000 / 100 |
+| **Iterations** | 400 | 600 |
+
+Stage 1 is identical to the hybrid two-stage mode. Stage 2 switches to the exact Cholesky scheme, which introduces no fBm discretisation bias but detaches $H$ from the computational graph (already frozen). This mode isolates the effect of the hybrid scheme's residual approximation error in Stage 2: if the hybrid two-stage mode produces lower RMSE, the hybrid scheme interacts more favourably with the Adam optimiser's momentum state than the exact scheme does.
+
+#### Approximate–exact (`two_stage`)
+
+| | Stage 1 | Stage 2 |
+|--|---------|---------|
+| **fBm scheme** | Approximate Riemann | Exact Cholesky |
+| **$H$ status** | Free (differentiable) | Frozen at Stage 1 value |
+| **Variance curve** | Simplified | Full |
+| **Paths / steps** | 10,000 / 50 | 30,000 / 50 |
+| **Iterations** | 800 | 800 |
+
+The cheapest mode per iteration. Stage 1 uses the left-point Riemann discretisation of the Volterra integral, which keeps $H$ differentiable but introduces a downward variance bias near the kernel singularity. This bias pushes $H$ higher toward the Markovian regime and inflates $\alpha$ to compensate for the missing variance. Stage 2 switches to the exact Cholesky scheme. Serves as a baseline for assessing the benefit of the hybrid near-field treatment in the other modes.
+
+#### Additional modes
+
 | Mode | Description |
 |------|-------------|
-| `hybrid` | Single-stage hybrid, all parameters free |
-| `hybrid_two_stage` | **Primary.** Stage 1: simplified variance curve, $H$ free. Stage 2: full variance curve, $H$ frozen |
-| `hybrid_exact` | Stage 1: hybrid. Stage 2: exact Cholesky ($H$ frozen) |
-| `two_stage` | Stage 1: approximate Riemann. Stage 2: exact Cholesky |
-| `cross` | Train/test split cross-validation |
-| `roughness` | Ablation: re-calibrate at fixed $H \in \{0.05, 0.10, \ldots, 0.50\}$ |
+| `cross` | Train/test split cross-validation. Runs hybrid two-stage on 13 training swaptions, evaluates on 6 held-out instruments. |
+| `roughness` | Roughness ablation. Re-calibrates at each fixed $H \in \{0.05, 0.10, \ldots, 0.50\}$ using the exact Cholesky scheme (1,200 iterations each). The case $H = 0.50$ uses the Markovian SABR scheme. |
 
 ### Cross-validation
 
