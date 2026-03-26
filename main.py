@@ -14,7 +14,7 @@ import py_lets_be_rational as _lbr
 # The exact Cholesky covariance build (2M×2M) is always done in float64 for
 # numerical stability and cast down afterwards.
 # ---------------------------------------------------------------------------
-DTYPE = torch.float32
+DTYPE = torch.float64
 
 def set_dtype(dt: torch.dtype):
     """Change the global dtype at runtime (before loading data)."""

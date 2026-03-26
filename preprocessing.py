@@ -84,10 +84,13 @@ CURRENCY_CONFIG = {
 
 # Date mapping: (filename_stem, sheet_prefix) -> ISO date string
 DATE_MAP = [
+    # December 2024 cluster
     ("Dez2024", "0912", "2024-12-09"),
     ("Dez2024", "1012", "2024-12-10"),
+    # December 2025 cluster
     ("Dez2025", "0812", "2025-12-08"),
     ("Dez2025", "0912", "2025-12-09"),
+
 ]
 
 # Default calibration / evaluation dates
@@ -245,32 +248,48 @@ def parse_otm_ivs(path: str, sheet: str) -> pd.DataFrame:
 # 3. Swaption analytics
 # =============================================================================
 
-def forward_swap_rate(P, I, J):
-    """Forward swap rate using discount factors P (from discounting curve)."""
-    A0 = THETA * np.sum(P[I + 1:J + 1])
-    return (P[I] - P[J]) / A0
+def forward_swap_rate(P_disc, I, J, R_proj=None):
+    """Forward swap rate.
 
-def forward_annuity(P, I, J):
-    """Forward annuity using discount factors P (from discounting curve)."""
-    return THETA * np.sum(P[I + 1:J + 1])
+    Single-curve (R_proj is None):
+        S0 = (P(T_I) - P(T_J)) / A0  [telescoping identity]
 
-def frozen_weights(P, I, J):
+    Dual-curve (R_proj provided):
+        S0 = sum_j tau_j * P_disc(T_j) * R_proj_j / A0
+        where A0 = sum_j tau_j * P_disc(T_j).
+        The telescoping identity does not hold when the projection
+        and discounting curves differ.
+    """
+    A0 = THETA * np.sum(P_disc[I + 1:J + 1])
+    if R_proj is None:
+        return (P_disc[I] - P_disc[J]) / A0
+    else:
+        float_pv = sum(THETA * P_disc[j] * R_proj[j]
+                       for j in range(I + 1, J + 1))
+        return float_pv / A0
+
+def forward_annuity(P_disc, I, J):
+    """Forward annuity using discount factors P_disc (from discounting curve)."""
+    return THETA * np.sum(P_disc[I + 1:J + 1])
+
+def frozen_weights(P_disc, I, J, S0):
     """Frozen annuity weights Pi^0_j (eq. 6 of Adachi).
 
-    Uses discount factors P from the discounting curve.
+    Uses discount factors P_disc from the discounting curve and
+    the precomputed swap rate S0 (which may be dual-curve).
     """
-    A0 = forward_annuity(P, I, J)
-    S0 = forward_swap_rate(P, I, J)
+    A0 = forward_annuity(P_disc, I, J)
     Pi = np.zeros(J - I)
     for idx, j in enumerate(range(I + 1, J + 1)):
-        bracket = P[J] + S0 * THETA * np.sum(P[j:J + 1])
-        Pi[idx] = (THETA * P[j]) / (A0 * P[j - 1]) * bracket
+        bracket = P_disc[J] + S0 * THETA * np.sum(P_disc[j:J + 1])
+        Pi[idx] = (THETA * P_disc[j]) / (A0 * P_disc[j - 1]) * bracket
     return Pi
 
 def normalized_weights(Pi, R, I, J, S0):
     """pi_j = Pi^0_j * R_j / S_0.
 
     R contains the forward rates (from projection curve in dual-curve).
+    S0 is the (possibly dual-curve) swap rate.
     """
     pi = np.zeros(J - I)
     for idx, j in enumerate(range(I + 1, J + 1)):
@@ -365,14 +384,14 @@ def build_swaption_data(P_disc, R_proj, atm_df, otm_df, T_N):
         if key in swaptions:
             continue
 
-        # Swap rate and annuity from discounting curve
-        S0 = forward_swap_rate(P_disc, I, J)
+        # Swap rate: dual-curve if R_proj differs from P_disc-implied rates
+        S0 = forward_swap_rate(P_disc, I, J, R_proj=R_proj)
         A0 = forward_annuity(P_disc, I, J)
 
-        # Frozen weights from discounting curve
-        Pi = frozen_weights(P_disc, I, J)
+        # Frozen weights from discounting curve, using dual-curve S0
+        Pi = frozen_weights(P_disc, I, J, S0)
 
-        # Normalised weights use projection-curve forward rates
+        # Normalised weights use projection-curve forward rates and dual-curve S0
         pi = normalized_weights(Pi, R_proj, I, J, S0)
 
         # ATM
@@ -412,6 +431,15 @@ def build_swaption_data(P_disc, R_proj, atm_df, otm_df, T_N):
             bachelier_to_black_iv(S0, K, T_expiry, sig_n, A0, ic)
             for K, sig_n, ic in zip(strikes, ivs_normal, is_call)
         ])
+
+        # Filter out strikes where Black IV conversion failed (NaN)
+        valid_mask = ~np.isnan(ivs_black)
+        if not np.all(valid_mask):
+            strikes = strikes[valid_mask]
+            ivs_normal = ivs_normal[valid_mask]
+            ivs_black = ivs_black[valid_mask]
+            offsets = offsets[valid_mask]
+            is_call = is_call[valid_mask]
 
         # Compute Black prices and vegas (using Black IV)
         prices_black = np.array([

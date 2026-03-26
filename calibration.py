@@ -32,7 +32,7 @@ from main import (
 
 CONFIG = {
     # --- Data ---
-    "data_file": "usd_swaption_data.pkl",
+    "data_file": "eur_swaption_data.pkl",
     "subset": "joint_all_smiles",
     "in_sample_date": "2024-12-09",
     "out_sample_date": "2024-12-10",
@@ -280,12 +280,13 @@ def _resolve_diag_scheme(cfg):
     return raw
 
 
-def _auto_select_test_keys(all_keys):
+def _auto_select_test_keys(all_keys, swaptions=None):
     """Auto-select ~5 test keys for cross-validation.
 
     Strategy: for each expiry that has multiple tenors, hold out one
     multi-rate swaption (preferring the middle tenor). Never selects
-    1Y-tenor swaptions since those anchor α.
+    1Y-tenor swaptions since those anchor α. Only selects swaptions
+    with smile data (n_strikes > 1) when swaption dict is provided.
     """
     by_expiry = {}
     for key in all_keys:
@@ -295,8 +296,10 @@ def _auto_select_test_keys(all_keys):
     test_keys = []
     for exp in sorted(by_expiry.keys()):
         keys = by_expiry[exp]
-        # Only multi-rate candidates (tenor > 1)
+        # Only multi-rate candidates (tenor > 1) with smile data
         multi = [k for k in keys if k[1] > 1]
+        if swaptions is not None:
+            multi = [k for k in multi if swaptions[k]["n_strikes"] > 1]
         if not multi:
             continue
         # Pick the middle tenor
@@ -664,12 +667,13 @@ def run_mode_cross(params, mkt, cfg):
     ccfg = cfg["cross"]
 
     all_keys = sorted(mkt.swaptions.keys())
-    test_keys = [k for k in ccfg["test_keys"] if k in mkt.swaptions]
+    test_keys = [k for k in ccfg["test_keys"]
+                 if k in mkt.swaptions and mkt.swaptions[k]["n_strikes"] > 1]
 
     if len(test_keys) < 3:
-        print(f"  Only {len(test_keys)} configured test keys found in market data.")
+        print(f"  Only {len(test_keys)} configured test keys have smile data.")
         print(f"  Auto-selecting test keys from available swaptions...")
-        test_keys = _auto_select_test_keys(all_keys)
+        test_keys = _auto_select_test_keys(all_keys, mkt.swaptions)
 
     train_keys = [k for k in all_keys if k not in test_keys]
 
@@ -1885,6 +1889,13 @@ if __name__ == "__main__":
         device=cfg["device"],
     )
     print_market_summary(mkt)
+    for key, swn in mkt.swaptions.items():
+        if torch.isnan(swn.ivs_black).any():
+            print(f"  WARNING: NaN in Black IVs for {key}")
+        if torch.isnan(swn.target_prices).any():
+            print(f"  WARNING: NaN in target prices for {key}")
+        if torch.isnan(swn.vegas).any():
+            print(f"  WARNING: NaN in vegas for {key}")
 
     if mode == "roughness":
         H_values = cfg["roughness"]["H_values"]
