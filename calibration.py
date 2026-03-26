@@ -32,7 +32,7 @@ from main import (
 
 CONFIG = {
     # --- Data ---
-    "data_file": "eur_swaption_data.pkl",
+    "data_file": "usd_swaption_data.pkl",
     "subset": "joint_all_smiles",
     "in_sample_date": "2024-12-09",
     "out_sample_date": "2024-12-10",
