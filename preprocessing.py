@@ -1,7 +1,7 @@
 """
 preprocessing.py
 ============================
-Preprocessing pipeline for swaption data (USD SOFR / EUR ESTR).
+Preprocessing pipeline for swaption data (USD SOFR / EUR EURIBOR).
 
 Transforms Bloomberg London Closing data — swap rates, ATM and OTM
 swaption IVs — into calibration-ready tensors for the Mapped Rough SABR FMM.
@@ -17,10 +17,14 @@ Data layout
 -----------
 Input files (placed in `dataUSD/` or `dataEUR/` subfolder):
 
-    Dez2024IV.xlsx      sheets: 0912ATM, 0912OTM, 1012ATM, 1012OTM, 1112ATM, 1112OTM
-    Dez2024SOFR.xlsx    sheets: 0912SOFR, 1012SOFR, 1112SOFR
-    Dez2025IV.xlsx      sheets: 0812ATM, 0812OTM, 0912ATM, 0912OTM, 1012ATM, 1012OTM
-    Dez2025SOFR.xlsx    sheets: 0812SOFR, 0912SOFR, 1012SOFR
+    USD (single-curve):
+        Dez2024IV.xlsx      sheets: 0912ATM, 0912OTM, ...
+        Dez2024SOFR.xlsx    sheets: 0912SOFR, ...
+
+    EUR (dual-curve):
+        Dez2024IV.xlsx      sheets: 0912ATM, 0912OTM, ...
+        Dez2024ESTR.xlsx    sheets: 0912ESTR, ...     (discounting)
+        Dez2024EURIBOR.xlsx sheets: 0912EURIBOR, ...   (forward rates)
 
 Each sheet prefix (e.g. "0912") encodes the date as DDMM.
 
@@ -47,7 +51,7 @@ from main import black_iv
 # Annual tenor grid for the FMM (Adachi: T_N = 11)
 T_N = 11
 
-# Year fraction for annual payments (theta = 1 for annual)
+# Year fraction for annual payments (tau = 1 for annual)
 THETA = 1.0
 
 # OTM strike offsets in basis points
@@ -58,32 +62,32 @@ OTM_OFFSETS_BPS = [-200, -100, -50, -25, 25, 50, 100, 200]
 CURRENCY_CONFIG = {
     "usd": {
         "data_dir": Path("dataUSD"),
-        "rate_file_suffix": "SOFR",       # e.g. Dez2024SOFR.xlsx
-        "rate_sheet_suffix": "SOFR",       # e.g. 0912SOFR
+        "discount_file_suffix": "SOFR",
+        "discount_sheet_suffix": "SOFR",
+        "projection_file_suffix": None,       # single-curve: same as discount
+        "projection_sheet_suffix": None,
         "output_file": "usd_swaption_data.pkl",
         "label": "USD SOFR",
+        "dual_curve": False,
     },
     "eur": {
         "data_dir": Path("dataEUR"),
-        "rate_file_suffix": "ESTR",        # Bloomberg file naming
-        "rate_sheet_suffix": "ESTR",        # Bloomberg sheet naming
+        "discount_file_suffix": "ESTR",       # OIS discounting curve
+        "discount_sheet_suffix": "ESTR",
+        "projection_file_suffix": "EURIBOR",  # forward rate projection curve
+        "projection_sheet_suffix": "EURIBOR",
         "output_file": "eur_swaption_data.pkl",
-        "label": "EUR ESTR",
+        "label": "EUR EURIBOR",
+        "dual_curve": True,
     },
 }
 
 # Date mapping: (filename_stem, sheet_prefix) -> ISO date string
-# Sheet prefix convention: DDMM (day-month)
-# Shared across currencies (same date clusters)
 DATE_MAP = [
-    # December 2024 cluster
     ("Dez2024", "0912", "2024-12-09"),
     ("Dez2024", "1012", "2024-12-10"),
-    ("Dez2024", "1112", "2024-12-11"),
-    # December 2025 cluster
     ("Dez2025", "0812", "2025-12-08"),
     ("Dez2025", "0912", "2025-12-09"),
-    ("Dez2025", "1012", "2025-12-10"),
 ]
 
 # Default calibration / evaluation dates
@@ -92,11 +96,14 @@ DEFAULT_OUT_SAMPLE = "2024-12-10"
 
 
 # =============================================================================
-# 1. SOFR curve: parsing and bootstrapping
+# 1. Rate curve: parsing and bootstrapping
 # =============================================================================
 
-def parse_sofr_rates(path: str, sheet: str) -> pd.DataFrame:
-    """Parse SOFR swap rates from a Bloomberg export sheet."""
+def parse_rate_curve(path: str, sheet: str) -> pd.DataFrame:
+    """Parse swap/OIS rates from a Bloomberg export sheet.
+
+    Works for both SOFR, ESTR, and EURIBOR curves.
+    """
     df = pd.read_excel(path, sheet_name=sheet)
     df["mid_rate"] = (df["Final Bid Rate"] + df["Final Ask Rate"]) / 2.0
 
@@ -116,15 +123,19 @@ def parse_sofr_rates(path: str, sheet: str) -> pd.DataFrame:
     return df[["maturity_years", "mid_rate"]].copy()
 
 
-def bootstrap_discount_curve(sofr_df: pd.DataFrame, max_T: int = 31) -> dict:
+def bootstrap_discount_curve(rate_df: pd.DataFrame, max_T: int = 31) -> dict:
     """
-    Bootstrap zero-coupon discount factors from SOFR swap rates.
+    Bootstrap zero-coupon discount factors from swap rates.
 
-    s_T * sum_{i=1}^{T} theta * P(T_i) = 1 - P(T)
-    => P(T) = (1 - s_T * theta * sum_{i=1}^{T-1} P(T_i)) / (1 + s_T * theta)
+    Assumes annual fixed payments (tau = 1):
+        s_T * sum_{i=1}^{T} tau * P(T_i) = 1 - P(T)
+        => P(T) = (1 - s_T * tau * sum_{i=1}^{T-1} P(T_i)) / (1 + s_T * tau)
+
+    Works for both OIS (SOFR, ESTR) and IBOR (EURIBOR) swap rates,
+    as both have annual fixed legs.
     """
-    raw_mats = sofr_df["maturity_years"].values
-    raw_rates = sofr_df["mid_rate"].values / 100.0  # % -> decimal
+    raw_mats = rate_df["maturity_years"].values
+    raw_rates = rate_df["mid_rate"].values / 100.0  # % -> decimal
 
     # Interpolate onto annual grid
     swap_rates = np.zeros(max_T + 1)
@@ -142,7 +153,7 @@ def bootstrap_discount_curve(sofr_df: pd.DataFrame, max_T: int = 31) -> dict:
 
 
 def compute_forward_term_rates(P: np.ndarray) -> np.ndarray:
-    """R_j = (1/theta) * (P(T_{j-1})/P(T_j) - 1)."""
+    """R_j = (1/tau) * (P(T_{j-1})/P(T_j) - 1)."""
     N = len(P) - 1
     R = np.zeros(N + 1)
     for j in range(1, N + 1):
@@ -235,14 +246,19 @@ def parse_otm_ivs(path: str, sheet: str) -> pd.DataFrame:
 # =============================================================================
 
 def forward_swap_rate(P, I, J):
+    """Forward swap rate using discount factors P (from discounting curve)."""
     A0 = THETA * np.sum(P[I + 1:J + 1])
     return (P[I] - P[J]) / A0
 
 def forward_annuity(P, I, J):
+    """Forward annuity using discount factors P (from discounting curve)."""
     return THETA * np.sum(P[I + 1:J + 1])
 
 def frozen_weights(P, I, J):
-    """Frozen annuity weights Pi^0_j (eq. 6 of Adachi)."""
+    """Frozen annuity weights Pi^0_j (eq. 6 of Adachi).
+
+    Uses discount factors P from the discounting curve.
+    """
     A0 = forward_annuity(P, I, J)
     S0 = forward_swap_rate(P, I, J)
     Pi = np.zeros(J - I)
@@ -252,7 +268,10 @@ def frozen_weights(P, I, J):
     return Pi
 
 def normalized_weights(Pi, R, I, J, S0):
-    """pi_j = Pi^0_j * R_j / S_0."""
+    """pi_j = Pi^0_j * R_j / S_0.
+
+    R contains the forward rates (from projection curve in dual-curve).
+    """
     pi = np.zeros(J - I)
     for idx, j in enumerate(range(I + 1, J + 1)):
         pi[idx] = Pi[idx] * R[j] / S0
@@ -278,11 +297,7 @@ def bachelier_vega(S0, K, T, sigma_n, A0):
     return A0 * sqrt_T * norm.pdf(d)
 
 def bachelier_to_black_iv(S0, K, T, sigma_n, A0, is_call=True):
-    """Convert Bachelier normal vol to Black lognormal vol.
-
-    Prices via Bachelier, then inverts using black_iv() from main.py
-    (py_lets_be_rational when available, Halley fallback otherwise).
-    """
+    """Convert Bachelier normal vol to Black lognormal vol."""
     if S0 <= 0 or K <= 0 or T <= 0 or sigma_n <= 0:
         return np.nan
     target = bachelier_price(S0, K, T, sigma_n, A0, is_call)
@@ -315,9 +330,18 @@ def black_vega(S0, K, T, sigma, A0):
 # 4. Build swaption data for one date
 # =============================================================================
 
-def build_swaption_data(P, R, atm_df, otm_df, T_N):
+def build_swaption_data(P_disc, R_proj, atm_df, otm_df, T_N):
     """
     Build structured swaption dictionary for a single date.
+
+    In the dual-curve setting (EUR):
+      - P_disc: discount factors from the OIS (ESTR) curve
+                used for annuities, swap rates, frozen weights
+      - R_proj: forward rates from the projection (EURIBOR) curve
+                used for the FMM dynamics and normalised weights
+
+    In the single-curve setting (USD):
+      - P_disc and R_proj are derived from the same SOFR curve
 
     ALL IVs are stored in TWO formats:
       - ivs_normal:  Bachelier normal vol in decimal  (as quoted)
@@ -341,10 +365,15 @@ def build_swaption_data(P, R, atm_df, otm_df, T_N):
         if key in swaptions:
             continue
 
-        S0 = forward_swap_rate(P, I, J)
-        A0 = forward_annuity(P, I, J)
-        Pi = frozen_weights(P, I, J)
-        pi = normalized_weights(Pi, R, I, J, S0)
+        # Swap rate and annuity from discounting curve
+        S0 = forward_swap_rate(P_disc, I, J)
+        A0 = forward_annuity(P_disc, I, J)
+
+        # Frozen weights from discounting curve
+        Pi = frozen_weights(P_disc, I, J)
+
+        # Normalised weights use projection-curve forward rates
+        pi = normalized_weights(Pi, R_proj, I, J, S0)
 
         # ATM
         atm_iv_normal = row["atm_iv_normal"]  # Bachelier vol, decimal
@@ -458,26 +487,55 @@ def build_calibration_subsets(swaptions):
 # 5. Package for one date
 # =============================================================================
 
-def process_single_date(iv_path, sofr_path, atm_sheet, otm_sheet, sofr_sheet,
-                        date_str, T_N=11, verbose=True, rate_label="rates"):
-    """Process one date: parse, bootstrap, build swaption data."""
+def process_single_date(iv_path, discount_path, atm_sheet, otm_sheet,
+                        discount_sheet, date_str, T_N=11, verbose=True,
+                        projection_path=None, projection_sheet=None,
+                        dual_curve=False, rate_label="rates"):
+    """Process one date: parse, bootstrap, build swaption data.
+
+    For single-curve (USD SOFR):
+        discount_path provides both P (discount factors) and R (forward rates).
+
+    For dual-curve (EUR):
+        discount_path  -> ESTR curve  -> P (discount factors for annuities)
+        projection_path -> EURIBOR curve -> R (forward rates for FMM dynamics)
+    """
 
     if verbose:
         print(f"\n{'='*60}")
         print(f"  Processing {date_str}")
-        print(f"  IV:    {iv_path} → {atm_sheet}, {otm_sheet}")
-        print(f"  Rates: {sofr_path} → {sofr_sheet}")
+        print(f"  IV:        {iv_path} -> {atm_sheet}, {otm_sheet}")
+        print(f"  Discount:  {discount_path} -> {discount_sheet}")
+        if dual_curve:
+            print(f"  Projection: {projection_path} -> {projection_sheet}")
+        print(f"  Mode:      {'dual-curve' if dual_curve else 'single-curve'}")
         print(f"{'='*60}")
 
-    # 1. SOFR curve
-    sofr_df = parse_sofr_rates(str(sofr_path), sofr_sheet)
-    curve = bootstrap_discount_curve(sofr_df, max_T=max(T_N, 31))
-    P = curve["discount_factors"]
-    R = compute_forward_term_rates(P)
+    # 1a. Discounting curve (SOFR or ESTR)
+    disc_df = parse_rate_curve(str(discount_path), discount_sheet)
+    disc_curve = bootstrap_discount_curve(disc_df, max_T=max(T_N, 31))
+    P_disc = disc_curve["discount_factors"]
+
+    if dual_curve:
+        # 1b. Projection curve (EURIBOR) — bootstrap separately
+        proj_df = parse_rate_curve(str(projection_path), projection_sheet)
+        proj_curve = bootstrap_discount_curve(proj_df, max_T=max(T_N, 31))
+        P_proj = proj_curve["discount_factors"]
+        # Forward rates from EURIBOR discount curve
+        R_proj = compute_forward_term_rates(P_proj)
+    else:
+        # Single-curve: forward rates from same curve as discounting
+        P_proj = P_disc
+        R_proj = compute_forward_term_rates(P_disc)
 
     if verbose:
-        print(f"  P(1Y)={P[1]:.6f}  P(5Y)={P[5]:.6f}  P(10Y)={P[10]:.6f}")
-        print(f"  R_1={R[1]*100:.3f}%  R_5={R[5]*100:.3f}%  R_10={R[10]*100:.3f}%")
+        print(f"  Discount curve:   P(1Y)={P_disc[1]:.6f}  "
+              f"P(5Y)={P_disc[5]:.6f}  P(10Y)={P_disc[10]:.6f}")
+        if dual_curve:
+            print(f"  Projection curve: P(1Y)={P_proj[1]:.6f}  "
+                  f"P(5Y)={P_proj[5]:.6f}  P(10Y)={P_proj[10]:.6f}")
+        print(f"  R_1={R_proj[1]*100:.3f}%  R_5={R_proj[5]*100:.3f}%  "
+              f"R_10={R_proj[10]*100:.3f}%")
 
     # 2. IV data
     atm_df = parse_atm_ivs(str(iv_path), atm_sheet)
@@ -488,33 +546,45 @@ def process_single_date(iv_path, sofr_path, atm_sheet, otm_sheet, sofr_sheet,
         print(f"  OTM: {len(otm_df)} observations")
 
     # 3. Build swaption data
-    swaptions = build_swaption_data(P, R, atm_df, otm_df, T_N)
+    #    P_disc for discounting (annuities, swap rates, frozen weights)
+    #    R_proj for forward rates (normalised weights, FMM dynamics)
+    swaptions = build_swaption_data(P_disc, R_proj, atm_df, otm_df, T_N)
     subsets = build_calibration_subsets(swaptions)
 
     if verbose:
         n_smile = sum(1 for s in swaptions.values() if s["n_strikes"] > 1)
         n_atm = sum(1 for s in swaptions.values() if s["n_strikes"] == 1)
-        print(f"  Swaptions: {len(swaptions)} total ({n_smile} with smiles, {n_atm} ATM-only)")
+        print(f"  Swaptions: {len(swaptions)} total "
+              f"({n_smile} with smiles, {n_atm} ATM-only)")
         for name, sub in subsets.items():
             print(f"    {name}: {len(sub)}")
 
     # 4. Package
+    #    IMPORTANT: discount_factors = P_disc (ESTR for EUR, SOFR for USD)
+    #               forward_term_rates = R_proj (EURIBOR for EUR, SOFR for USD)
+    #    main.py uses P for annuities and R for FMM dynamics independently.
     date_data = {
         "date": date_str,
-        "discount_factors": P[:T_N + 1].astype(np.float64),
-        "forward_term_rates": R[:T_N + 1].astype(np.float64),
+        "discount_factors": P_disc[:T_N + 1].astype(np.float64),
+        "forward_term_rates": R_proj[:T_N + 1].astype(np.float64),
         "theta": THETA,
         "T_N": T_N,
+        "dual_curve": dual_curve,
         "swaptions": swaptions,
         "calibration_subsets": {
             name: sorted(sub.keys()) for name, sub in subsets.items()
         },
         "curve": {
-            "discount_factors": P.astype(np.float64),
-            "forward_term_rates": R.astype(np.float64),
-            "swap_rates_annual": curve["swap_rates_annual"].astype(np.float64),
+            "discount_factors": P_disc.astype(np.float64),
+            "forward_term_rates": R_proj.astype(np.float64),
+            "discount_swap_rates": disc_curve["swap_rates_annual"].astype(np.float64),
         },
     }
+
+    if dual_curve:
+        date_data["curve"]["projection_discount_factors"] = P_proj.astype(np.float64)
+        date_data["curve"]["projection_swap_rates"] = \
+            proj_curve["swap_rates_annual"].astype(np.float64)
 
     return date_data
 
@@ -533,13 +603,19 @@ def main():
 
     ccfg = CURRENCY_CONFIG[args.currency]
     data_dir = ccfg["data_dir"]
-    rate_suffix = ccfg["rate_file_suffix"]
-    sheet_suffix = ccfg["rate_sheet_suffix"]
+    disc_suffix = ccfg["discount_file_suffix"]
+    disc_sheet_suffix = ccfg["discount_sheet_suffix"]
+    proj_suffix = ccfg["projection_file_suffix"]
+    proj_sheet_suffix = ccfg["projection_sheet_suffix"]
+    dual_curve = ccfg["dual_curve"]
     output_path = ccfg["output_file"]
     label = ccfg["label"]
 
     print("=" * 70)
     print(f"{label} Swaption Data Preprocessing (multi-date)")
+    if dual_curve:
+        print(f"  Dual-curve mode: {disc_suffix} (discounting) + "
+              f"{proj_suffix} (projection)")
     print("=" * 70)
 
     all_data = {}
@@ -547,23 +623,36 @@ def main():
 
     for file_stem, sheet_prefix, date_str in DATE_MAP:
         iv_path = data_dir / f"{file_stem}IV.xlsx"
-        rate_path = data_dir / f"{file_stem}{rate_suffix}.xlsx"
+        disc_path = data_dir / f"{file_stem}{disc_suffix}.xlsx"
         atm_sheet = f"{sheet_prefix}ATM"
         otm_sheet = f"{sheet_prefix}OTM"
-        rate_sheet = f"{sheet_prefix}{sheet_suffix}"
+        disc_sheet = f"{sheet_prefix}{disc_sheet_suffix}"
 
         # Check files exist
         if not iv_path.exists():
             print(f"  WARNING: {iv_path} not found, skipping {date_str}")
             continue
-        if not rate_path.exists():
-            print(f"  WARNING: {rate_path} not found, skipping {date_str}")
+        if not disc_path.exists():
+            print(f"  WARNING: {disc_path} not found, skipping {date_str}")
             continue
 
+        # Projection curve (dual-curve only)
+        proj_path = None
+        proj_sheet = None
+        if dual_curve:
+            proj_path = data_dir / f"{file_stem}{proj_suffix}.xlsx"
+            proj_sheet = f"{sheet_prefix}{proj_sheet_suffix}"
+            if not proj_path.exists():
+                print(f"  WARNING: {proj_path} not found, skipping {date_str}")
+                continue
+
         date_data = process_single_date(
-            iv_path, rate_path,
-            atm_sheet, otm_sheet, rate_sheet,
+            iv_path, disc_path,
+            atm_sheet, otm_sheet, disc_sheet,
             date_str, T_N=T_N, verbose=True,
+            projection_path=proj_path,
+            projection_sheet=proj_sheet,
+            dual_curve=dual_curve,
             rate_label=label,
         )
         all_data[date_str] = date_data
@@ -580,6 +669,7 @@ def main():
         "default_out_sample": DEFAULT_OUT_SAMPLE,
         "iv_convention": "bachelier_normal_bps",
         "iv_storage": "decimal (bps / 10000)",
+        "dual_curve": dual_curve,
     }
 
     # Save
@@ -594,7 +684,8 @@ def main():
     summary_path = f"data_summary_{args.currency}.txt"
     with open(summary_path, "w") as f:
         f.write(f"{label} Swaption Data Summary (multi-date)\n")
-        f.write(f"T_N = {T_N}, theta = {THETA}\n")
+        f.write(f"T_N = {T_N}, tau = {THETA}\n")
+        f.write(f"Dual-curve: {dual_curve}\n")
         f.write(f"All IVs are Bachelier (normal) vol, stored in decimal\n\n")
 
         for date_str in sorted(dates):
@@ -605,25 +696,28 @@ def main():
             f.write(f"Date: {date_str}\n")
             f.write(f"{'='*60}\n\n")
 
-            f.write("Discount factors:\n")
+            f.write("Discount factors (ESTR/SOFR):\n")
             for j in range(T_N + 1):
                 f.write(f"  P(T_{j}) = {P[j]:.8f}\n")
 
-            f.write("\nForward term rates:\n")
+            f.write("\nForward term rates (EURIBOR/SOFR):\n")
             for j in range(1, T_N + 1):
                 f.write(f"  R_{j} = {R[j]*100:.4f}%\n")
 
             f.write(f"\nSwaptions ({len(dd['swaptions'])} total):\n")
             for key in sorted(dd["swaptions"].keys()):
                 swn = dd["swaptions"][key]
-                f.write(f"\n  {swn['expiry_years']:.0f}Y x {swn['tenor_years']:.0f}Y "
+                f.write(f"\n  {swn['expiry_years']:.0f}Y x "
+                        f"{swn['tenor_years']:.0f}Y "
                         f"(I={swn['I']}, J={swn['J']}): "
                         f"S0={swn['S0']*100:.4f}%, "
                         f"{swn['n_strikes']} strikes\n")
-                f.write(f"    ATM normal vol = "
-                        f"{swn['ivs_normal'][swn['offset_bps']==0][0]*10000:.2f} bps, "
-                        f"Black vol = "
-                        f"{swn['ivs_black'][swn['offset_bps']==0][0]*100:.2f}%\n")
+                atm_mask = swn['offset_bps'] == 0
+                if np.any(atm_mask):
+                    f.write(f"    ATM normal vol = "
+                            f"{swn['ivs_normal'][atm_mask][0]*10000:.2f} bps, "
+                            f"Black vol = "
+                            f"{swn['ivs_black'][atm_mask][0]*100:.2f}%\n")
             f.write("\n")
 
     print(f"Summary saved to {summary_path}")

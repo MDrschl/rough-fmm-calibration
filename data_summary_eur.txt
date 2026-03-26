@@ -1,12 +1,13 @@
-EUR ESTR Swaption Data Summary (multi-date)
-T_N = 11, theta = 1.0
+EUR EURIBOR Swaption Data Summary (multi-date)
+T_N = 11, tau = 1.0
+Dual-curve: True
 All IVs are Bachelier (normal) vol, stored in decimal
 
 ============================================================
 Date: 2024-12-09
 ============================================================
 
-Discount factors:
+Discount factors (ESTR/SOFR):
   P(T_0) = 1.00000000
   P(T_1) = 0.97909390
   P(T_2) = 0.96290775
@@ -20,18 +21,18 @@ Discount factors:
   P(T_10) = 0.81993935
   P(T_11) = 0.80169928
 
-Forward term rates:
-  R_1 = 2.1353%
-  R_2 = 1.6810%
-  R_3 = 1.7787%
-  R_4 = 1.8680%
-  R_5 = 1.9158%
-  R_6 = 1.9987%
-  R_7 = 2.0753%
-  R_8 = 2.1162%
-  R_9 = 2.1970%
-  R_10 = 2.2867%
-  R_11 = 2.2752%
+Forward term rates (EURIBOR/SOFR):
+  R_1 = 1.9500%
+  R_2 = 2.3030%
+  R_3 = 1.9576%
+  R_4 = 2.0195%
+  R_5 = 2.0742%
+  R_6 = 2.1137%
+  R_7 = 2.1550%
+  R_8 = 2.2014%
+  R_9 = 2.2444%
+  R_10 = 2.2955%
+  R_11 = 2.3184%
 
 Swaptions (55 total):
 
@@ -204,7 +205,7 @@ Swaptions (55 total):
 Date: 2024-12-10
 ============================================================
 
-Discount factors:
+Discount factors (ESTR/SOFR):
   P(T_0) = 1.00000000
   P(T_1) = 0.97926735
   P(T_2) = 0.96331622
@@ -218,18 +219,18 @@ Discount factors:
   P(T_10) = 0.81932835
   P(T_11) = 0.80063541
 
-Forward term rates:
-  R_1 = 2.1172%
-  R_2 = 1.6559%
-  R_3 = 1.7698%
-  R_4 = 1.8598%
-  R_5 = 1.9296%
-  R_6 = 2.0102%
-  R_7 = 2.0906%
-  R_8 = 2.1572%
-  R_9 = 2.2322%
-  R_10 = 2.3064%
-  R_11 = 2.3348%
+Forward term rates (EURIBOR/SOFR):
+  R_1 = 1.9280%
+  R_2 = 2.2714%
+  R_3 = 1.9531%
+  R_4 = 2.0258%
+  R_5 = 2.0771%
+  R_6 = 2.1329%
+  R_7 = 2.1775%
+  R_8 = 2.2278%
+  R_9 = 2.2863%
+  R_10 = 2.3189%
+  R_11 = 2.3433%
 
 Swaptions (55 total):
 
@@ -399,208 +400,10 @@ Swaptions (55 total):
     ATM normal vol = 73.41 bps, Black vol = 32.86%
 
 ============================================================
-Date: 2024-12-11
-============================================================
-
-Discount factors:
-  P(T_0) = 1.00000000
-  P(T_1) = 0.97940074
-  P(T_2) = 0.96350255
-  P(T_3) = 0.94680056
-  P(T_4) = 0.92928193
-  P(T_5) = 0.91149276
-  P(T_6) = 0.89331661
-  P(T_7) = 0.87491923
-  P(T_8) = 0.85625445
-  P(T_9) = 0.83724126
-  P(T_10) = 0.81852382
-  P(T_11) = 0.79935908
-
-Forward term rates:
-  R_1 = 2.1033%
-  R_2 = 1.6500%
-  R_3 = 1.7640%
-  R_4 = 1.8852%
-  R_5 = 1.9517%
-  R_6 = 2.0347%
-  R_7 = 2.1028%
-  R_8 = 2.1798%
-  R_9 = 2.2709%
-  R_10 = 2.2867%
-  R_11 = 2.3975%
-
-Swaptions (55 total):
-
-  1Y x 1Y (I=1, J=2): S0=1.6500%, 8 strikes
-    ATM normal vol = 80.08 bps, Black vol = 49.02%
-
-  1Y x 2Y (I=1, J=3): S0=1.7065%, 8 strikes
-    ATM normal vol = 81.33 bps, Black vol = 48.12%
-
-  1Y x 3Y (I=1, J=4): S0=1.7650%, 1 strikes
-    ATM normal vol = 79.11 bps, Black vol = 45.20%
-
-  1Y x 4Y (I=1, J=5): S0=1.8104%, 1 strikes
-    ATM normal vol = 76.98 bps, Black vol = 42.85%
-
-  1Y x 5Y (I=1, J=6): S0=1.8535%, 8 strikes
-    ATM normal vol = 74.93 bps, Black vol = 40.71%
-
-  1Y x 6Y (I=1, J=7): S0=1.8930%, 1 strikes
-    ATM normal vol = 73.68 bps, Black vol = 39.17%
-
-  1Y x 7Y (I=1, J=8): S0=1.9315%, 1 strikes
-    ATM normal vol = 72.52 bps, Black vol = 37.77%
-
-  1Y x 8Y (I=1, J=9): S0=1.9709%, 1 strikes
-    ATM normal vol = 71.50 bps, Black vol = 36.48%
-
-  1Y x 9Y (I=1, J=10): S0=2.0031%, 1 strikes
-    ATM normal vol = 70.46 bps, Black vol = 35.36%
-
-  1Y x 10Y (I=1, J=11): S0=2.0388%, 9 strikes
-    ATM normal vol = 69.47 bps, Black vol = 34.24%
-
-  2Y x 1Y (I=2, J=3): S0=1.7640%, 8 strikes
-    ATM normal vol = 81.05 bps, Black vol = 46.79%
-
-  2Y x 2Y (I=2, J=4): S0=1.8240%, 8 strikes
-    ATM normal vol = 81.26 bps, Black vol = 45.31%
-
-  2Y x 3Y (I=2, J=5): S0=1.8658%, 1 strikes
-    ATM normal vol = 79.41 bps, Black vol = 43.23%
-
-  2Y x 4Y (I=2, J=6): S0=1.9068%, 1 strikes
-    ATM normal vol = 77.43 bps, Black vol = 41.18%
-
-  2Y x 5Y (I=2, J=7): S0=1.9444%, 8 strikes
-    ATM normal vol = 75.66 bps, Black vol = 39.42%
-
-  2Y x 6Y (I=2, J=8): S0=1.9816%, 1 strikes
-    ATM normal vol = 74.22 bps, Black vol = 37.90%
-
-  2Y x 7Y (I=2, J=9): S0=2.0204%, 1 strikes
-    ATM normal vol = 73.19 bps, Black vol = 36.63%
-
-  2Y x 8Y (I=2, J=10): S0=2.0512%, 1 strikes
-    ATM normal vol = 72.38 bps, Black vol = 35.66%
-
-  2Y x 9Y (I=2, J=11): S0=2.0864%, 1 strikes
-    ATM normal vol = 71.74 bps, Black vol = 34.73%
-
-  3Y x 1Y (I=3, J=4): S0=1.8852%, 8 strikes
-    ATM normal vol = 80.12 bps, Black vol = 43.51%
-
-  3Y x 2Y (I=3, J=5): S0=1.9181%, 8 strikes
-    ATM normal vol = 80.07 bps, Black vol = 42.70%
-
-  3Y x 3Y (I=3, J=6): S0=1.9562%, 1 strikes
-    ATM normal vol = 78.41 bps, Black vol = 40.92%
-
-  3Y x 4Y (I=3, J=7): S0=1.9917%, 1 strikes
-    ATM normal vol = 76.66 bps, Black vol = 39.23%
-
-  3Y x 5Y (I=3, J=8): S0=2.0278%, 9 strikes
-    ATM normal vol = 75.17 bps, Black vol = 37.73%
-
-  3Y x 6Y (I=3, J=9): S0=2.0662%, 1 strikes
-    ATM normal vol = 74.02 bps, Black vol = 36.42%
-
-  3Y x 7Y (I=3, J=10): S0=2.0957%, 1 strikes
-    ATM normal vol = 72.96 bps, Black vol = 35.36%
-
-  3Y x 8Y (I=3, J=11): S0=2.1305%, 1 strikes
-    ATM normal vol = 72.57 bps, Black vol = 34.57%
-
-  4Y x 1Y (I=4, J=5): S0=1.9517%, 1 strikes
-    ATM normal vol = 79.37 bps, Black vol = 41.86%
-
-  4Y x 2Y (I=4, J=6): S0=1.9927%, 1 strikes
-    ATM normal vol = 78.96 bps, Black vol = 40.72%
-
-  4Y x 3Y (I=4, J=7): S0=2.0287%, 1 strikes
-    ATM normal vol = 77.34 bps, Black vol = 39.10%
-
-  4Y x 4Y (I=4, J=8): S0=2.0653%, 1 strikes
-    ATM normal vol = 75.83 bps, Black vol = 37.58%
-
-  4Y x 5Y (I=4, J=9): S0=2.1046%, 1 strikes
-    ATM normal vol = 74.83 bps, Black vol = 36.34%
-
-  4Y x 6Y (I=4, J=10): S0=2.1333%, 1 strikes
-    ATM normal vol = 73.89 bps, Black vol = 35.36%
-
-  4Y x 7Y (I=4, J=11): S0=2.1686%, 1 strikes
-    ATM normal vol = 73.10 bps, Black vol = 34.37%
-
-  5Y x 1Y (I=5, J=6): S0=2.0347%, 9 strikes
-    ATM normal vol = 77.83 bps, Black vol = 39.50%
-
-  5Y x 2Y (I=5, J=7): S0=2.0684%, 9 strikes
-    ATM normal vol = 77.51 bps, Black vol = 38.64%
-
-  5Y x 3Y (I=5, J=8): S0=2.1047%, 1 strikes
-    ATM normal vol = 75.76 bps, Black vol = 37.03%
-
-  5Y x 4Y (I=5, J=9): S0=2.1449%, 1 strikes
-    ATM normal vol = 74.63 bps, Black vol = 35.72%
-
-  5Y x 5Y (I=5, J=10): S0=2.1720%, 9 strikes
-    ATM normal vol = 73.96 bps, Black vol = 34.92%
-
-  5Y x 6Y (I=5, J=11): S0=2.2075%, 1 strikes
-    ATM normal vol = 73.28 bps, Black vol = 34.00%
-
-  6Y x 1Y (I=6, J=7): S0=2.1028%, 1 strikes
-    ATM normal vol = 76.65 bps, Black vol = 37.76%
-
-  6Y x 2Y (I=6, J=8): S0=2.1409%, 1 strikes
-    ATM normal vol = 76.44 bps, Black vol = 36.93%
-
-  6Y x 3Y (I=6, J=9): S0=2.1833%, 1 strikes
-    ATM normal vol = 74.73 bps, Black vol = 35.30%
-
-  6Y x 4Y (I=6, J=10): S0=2.2083%, 1 strikes
-    ATM normal vol = 73.70 bps, Black vol = 34.36%
-
-  6Y x 5Y (I=6, J=11): S0=2.2444%, 1 strikes
-    ATM normal vol = 73.18 bps, Black vol = 33.52%
-
-  7Y x 1Y (I=7, J=8): S0=2.1798%, 9 strikes
-    ATM normal vol = 75.52 bps, Black vol = 35.96%
-
-  7Y x 2Y (I=7, J=9): S0=2.2249%, 9 strikes
-    ATM normal vol = 75.39 bps, Black vol = 35.11%
-
-  7Y x 3Y (I=7, J=10): S0=2.2450%, 1 strikes
-    ATM normal vol = 73.72 bps, Black vol = 33.94%
-
-  7Y x 4Y (I=7, J=11): S0=2.2818%, 1 strikes
-    ATM normal vol = 72.86 bps, Black vol = 32.94%
-
-  8Y x 1Y (I=8, J=9): S0=2.2709%, 1 strikes
-    ATM normal vol = 74.56 bps, Black vol = 34.11%
-
-  8Y x 2Y (I=8, J=10): S0=2.2787%, 1 strikes
-    ATM normal vol = 74.44 bps, Black vol = 33.92%
-
-  8Y x 3Y (I=8, J=11): S0=2.3174%, 1 strikes
-    ATM normal vol = 72.98 bps, Black vol = 32.61%
-
-  9Y x 1Y (I=9, J=10): S0=2.2867%, 1 strikes
-    ATM normal vol = 73.70 bps, Black vol = 33.60%
-
-  9Y x 2Y (I=9, J=11): S0=2.3415%, 1 strikes
-    ATM normal vol = 73.59 bps, Black vol = 32.69%
-
-  10Y x 1Y (I=10, J=11): S0=2.3975%, 9 strikes
-    ATM normal vol = 72.84 bps, Black vol = 31.65%
-
-============================================================
 Date: 2025-12-08
 ============================================================
 
-Discount factors:
+Discount factors (ESTR/SOFR):
   P(T_0) = 1.00000000
   P(T_1) = 0.98087827
   P(T_2) = 0.96037894
@@ -614,18 +417,18 @@ Discount factors:
   P(T_10) = 0.76481732
   P(T_11) = 0.73952314
 
-Forward term rates:
-  R_1 = 1.9495%
-  R_2 = 2.1345%
-  R_3 = 2.3940%
-  R_4 = 2.5931%
-  R_5 = 2.7358%
-  R_6 = 2.8292%
-  R_7 = 2.9657%
-  R_8 = 3.0891%
-  R_9 = 3.2117%
-  R_10 = 3.2808%
-  R_11 = 3.4203%
+Forward term rates (EURIBOR/SOFR):
+  R_1 = 2.1660%
+  R_2 = 2.4211%
+  R_3 = 2.6430%
+  R_4 = 2.8223%
+  R_5 = 2.9501%
+  R_6 = 3.0511%
+  R_7 = 3.1727%
+  R_8 = 3.2974%
+  R_9 = 3.3729%
+  R_10 = 3.4606%
+  R_11 = 3.5544%
 
 Swaptions (55 total):
 
@@ -798,7 +601,7 @@ Swaptions (55 total):
 Date: 2025-12-09
 ============================================================
 
-Discount factors:
+Discount factors (ESTR/SOFR):
   P(T_0) = 1.00000000
   P(T_1) = 0.98089468
   P(T_2) = 0.96035959
@@ -812,18 +615,18 @@ Discount factors:
   P(T_10) = 0.76466483
   P(T_11) = 0.73933113
 
-Forward term rates:
-  R_1 = 1.9477%
-  R_2 = 2.1383%
-  R_3 = 2.3919%
-  R_4 = 2.5719%
-  R_5 = 2.7137%
-  R_6 = 2.8500%
-  R_7 = 2.9608%
-  R_8 = 3.1144%
-  R_9 = 3.2214%
-  R_10 = 3.2940%
-  R_11 = 3.4266%
+Forward term rates (EURIBOR/SOFR):
+  R_1 = 2.1680%
+  R_2 = 2.4281%
+  R_3 = 2.6349%
+  R_4 = 2.8060%
+  R_5 = 2.9238%
+  R_6 = 3.0468%
+  R_7 = 3.2045%
+  R_8 = 3.2970%
+  R_9 = 3.3832%
+  R_10 = 3.4825%
+  R_11 = 3.6021%
 
 Swaptions (55 total):
 
@@ -991,202 +794,4 @@ Swaptions (55 total):
 
   10Y x 1Y (I=10, J=11): S0=3.4266%, 9 strikes
     ATM normal vol = 69.97 bps, Black vol = 20.79%
-
-============================================================
-Date: 2025-12-10
-============================================================
-
-Discount factors:
-  P(T_0) = 1.00000000
-  P(T_1) = 0.98079361
-  P(T_2) = 0.96030835
-  P(T_3) = 0.93754911
-  P(T_4) = 0.91408689
-  P(T_5) = 0.89014426
-  P(T_6) = 0.86569666
-  P(T_7) = 0.84087388
-  P(T_8) = 0.81576967
-  P(T_9) = 0.79063254
-  P(T_10) = 0.76574974
-  P(T_11) = 0.74033573
-
-Forward term rates:
-  R_1 = 1.9583%
-  R_2 = 2.1332%
-  R_3 = 2.4275%
-  R_4 = 2.5667%
-  R_5 = 2.6897%
-  R_6 = 2.8240%
-  R_7 = 2.9520%
-  R_8 = 3.0774%
-  R_9 = 3.1794%
-  R_10 = 3.2495%
-  R_11 = 3.4328%
-
-Swaptions (55 total):
-
-  1Y x 1Y (I=1, J=2): S0=2.1332%, 9 strikes
-    ATM normal vol = 48.90 bps, Black vol = 22.97%
-
-  1Y x 2Y (I=1, J=3): S0=2.2786%, 9 strikes
-    ATM normal vol = 54.02 bps, Black vol = 23.76%
-
-  1Y x 3Y (I=1, J=4): S0=2.3723%, 1 strikes
-    ATM normal vol = 56.08 bps, Black vol = 23.70%
-
-  1Y x 4Y (I=1, J=5): S0=2.4486%, 1 strikes
-    ATM normal vol = 57.76 bps, Black vol = 23.64%
-
-  1Y x 5Y (I=1, J=6): S0=2.5198%, 9 strikes
-    ATM normal vol = 59.16 bps, Black vol = 23.53%
-
-  1Y x 6Y (I=1, J=7): S0=2.5870%, 1 strikes
-    ATM normal vol = 59.60 bps, Black vol = 23.09%
-
-  1Y x 7Y (I=1, J=8): S0=2.6512%, 1 strikes
-    ATM normal vol = 59.97 bps, Black vol = 22.67%
-
-  1Y x 8Y (I=1, J=9): S0=2.7108%, 1 strikes
-    ATM normal vol = 60.42 bps, Black vol = 22.34%
-
-  1Y x 9Y (I=1, J=10): S0=2.7638%, 1 strikes
-    ATM normal vol = 60.93 bps, Black vol = 22.09%
-
-  1Y x 10Y (I=1, J=11): S0=2.8219%, 9 strikes
-    ATM normal vol = 61.32 bps, Black vol = 21.77%
-
-  2Y x 1Y (I=2, J=3): S0=2.4275%, 9 strikes
-    ATM normal vol = 58.23 bps, Black vol = 24.10%
-
-  2Y x 2Y (I=2, J=4): S0=2.4962%, 9 strikes
-    ATM normal vol = 60.31 bps, Black vol = 24.28%
-
-  2Y x 3Y (I=2, J=5): S0=2.5591%, 1 strikes
-    ATM normal vol = 61.29 bps, Black vol = 24.07%
-
-  2Y x 4Y (I=2, J=6): S0=2.6227%, 1 strikes
-    ATM normal vol = 61.96 bps, Black vol = 23.74%
-
-  2Y x 5Y (I=2, J=7): S0=2.6849%, 9 strikes
-    ATM normal vol = 62.67 bps, Black vol = 23.45%
-
-  2Y x 6Y (I=2, J=8): S0=2.7457%, 1 strikes
-    ATM normal vol = 63.00 bps, Black vol = 23.05%
-
-  2Y x 7Y (I=2, J=9): S0=2.8024%, 1 strikes
-    ATM normal vol = 63.29 bps, Black vol = 22.68%
-
-  2Y x 8Y (I=2, J=10): S0=2.8526%, 1 strikes
-    ATM normal vol = 63.46 bps, Black vol = 22.34%
-
-  2Y x 9Y (I=2, J=11): S0=2.9094%, 1 strikes
-    ATM normal vol = 63.70 bps, Black vol = 21.98%
-
-  3Y x 1Y (I=3, J=4): S0=2.5667%, 9 strikes
-    ATM normal vol = 63.29 bps, Black vol = 24.85%
-
-  3Y x 2Y (I=3, J=5): S0=2.6274%, 9 strikes
-    ATM normal vol = 64.53 bps, Black vol = 24.75%
-
-  3Y x 3Y (I=3, J=6): S0=2.6912%, 1 strikes
-    ATM normal vol = 64.64 bps, Black vol = 24.20%
-
-  3Y x 4Y (I=3, J=7): S0=2.7537%, 1 strikes
-    ATM normal vol = 64.74 bps, Black vol = 23.68%
-
-  3Y x 5Y (I=3, J=8): S0=2.8147%, 9 strikes
-    ATM normal vol = 65.01 bps, Black vol = 23.25%
-
-  3Y x 6Y (I=3, J=9): S0=2.8710%, 1 strikes
-    ATM normal vol = 64.99 bps, Black vol = 22.78%
-
-  3Y x 7Y (I=3, J=10): S0=2.9203%, 1 strikes
-    ATM normal vol = 65.02 bps, Black vol = 22.40%
-
-  3Y x 8Y (I=3, J=11): S0=2.9776%, 1 strikes
-    ATM normal vol = 65.14 bps, Black vol = 22.01%
-
-  4Y x 1Y (I=4, J=5): S0=2.6897%, 1 strikes
-    ATM normal vol = 66.77 bps, Black vol = 25.08%
-
-  4Y x 2Y (I=4, J=6): S0=2.7560%, 1 strikes
-    ATM normal vol = 67.39 bps, Black vol = 24.70%
-
-  4Y x 3Y (I=4, J=7): S0=2.8194%, 1 strikes
-    ATM normal vol = 67.10 bps, Black vol = 24.03%
-
-  4Y x 4Y (I=4, J=8): S0=2.8811%, 1 strikes
-    ATM normal vol = 66.89 bps, Black vol = 23.43%
-
-  4Y x 5Y (I=4, J=9): S0=2.9372%, 1 strikes
-    ATM normal vol = 66.84 bps, Black vol = 22.96%
-
-  4Y x 6Y (I=4, J=10): S0=2.9853%, 1 strikes
-    ATM normal vol = 66.63 bps, Black vol = 22.51%
-
-  4Y x 7Y (I=4, J=11): S0=3.0434%, 1 strikes
-    ATM normal vol = 66.54 bps, Black vol = 22.04%
-
-  5Y x 1Y (I=5, J=6): S0=2.8240%, 9 strikes
-    ATM normal vol = 68.43 bps, Black vol = 24.54%
-
-  5Y x 2Y (I=5, J=7): S0=2.8871%, 9 strikes
-    ATM normal vol = 68.78 bps, Black vol = 24.11%
-
-  5Y x 3Y (I=5, J=8): S0=2.9486%, 1 strikes
-    ATM normal vol = 68.42 bps, Black vol = 23.47%
-
-  5Y x 4Y (I=5, J=9): S0=3.0037%, 1 strikes
-    ATM normal vol = 68.12 bps, Black vol = 22.93%
-
-  5Y x 5Y (I=5, J=10): S0=3.0498%, 9 strikes
-    ATM normal vol = 68.04 bps, Black vol = 22.55%
-
-  5Y x 6Y (I=5, J=11): S0=3.1087%, 1 strikes
-    ATM normal vol = 67.77 bps, Black vol = 22.02%
-
-  6Y x 1Y (I=6, J=7): S0=2.9520%, 1 strikes
-    ATM normal vol = 69.75 bps, Black vol = 23.97%
-
-  6Y x 2Y (I=6, J=8): S0=3.0137%, 1 strikes
-    ATM normal vol = 69.97 bps, Black vol = 23.54%
-
-  6Y x 3Y (I=6, J=9): S0=3.0673%, 1 strikes
-    ATM normal vol = 69.54 bps, Black vol = 22.97%
-
-  6Y x 4Y (I=6, J=10): S0=3.1107%, 1 strikes
-    ATM normal vol = 69.10 bps, Black vol = 22.50%
-
-  6Y x 5Y (I=6, J=11): S0=3.1710%, 1 strikes
-    ATM normal vol = 68.82 bps, Black vol = 21.97%
-
-  7Y x 1Y (I=7, J=8): S0=3.0774%, 9 strikes
-    ATM normal vol = 70.51 bps, Black vol = 23.28%
-
-  7Y x 2Y (I=7, J=9): S0=3.1276%, 9 strikes
-    ATM normal vol = 70.72 bps, Black vol = 22.96%
-
-  7Y x 3Y (I=7, J=10): S0=3.1669%, 1 strikes
-    ATM normal vol = 70.11 bps, Black vol = 22.46%
-
-  7Y x 4Y (I=7, J=11): S0=3.2302%, 1 strikes
-    ATM normal vol = 69.66 bps, Black vol = 21.87%
-
-  8Y x 1Y (I=8, J=9): S0=3.1794%, 1 strikes
-    ATM normal vol = 70.89 bps, Black vol = 22.68%
-
-  8Y x 2Y (I=8, J=10): S0=3.2139%, 1 strikes
-    ATM normal vol = 71.05 bps, Black vol = 22.48%
-
-  8Y x 3Y (I=8, J=11): S0=3.2844%, 1 strikes
-    ATM normal vol = 70.20 bps, Black vol = 21.71%
-
-  9Y x 1Y (I=9, J=10): S0=3.2495%, 1 strikes
-    ATM normal vol = 70.99 bps, Black vol = 22.25%
-
-  9Y x 2Y (I=9, J=11): S0=3.3396%, 1 strikes
-    ATM normal vol = 71.19 bps, Black vol = 21.69%
-
-  10Y x 1Y (I=10, J=11): S0=3.4328%, 9 strikes
-    ATM normal vol = 70.87 bps, Black vol = 21.03%
 
