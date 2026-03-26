@@ -19,11 +19,13 @@ rough-fmm-calibration/
 │   ├── Dez2024SOFR.xlsx
 │   ├── Dez2025IV.xlsx
 │   └── Dez2025SOFR.xlsx
-├── dataEUR/                   # Raw EUR ESTR swaption data
+├── dataEUR/                   # Raw EUR ESTR/EURIBOR swaption data
 │   ├── Dez2024IV.xlsx
 │   ├── Dez2024ESTR.xlsx
+│   ├── Dez2024EURIBOR.xlsx
 │   ├── Dez2025IV.xlsx
-│   └── Dez2025ESTR.xlsx
+│   ├── Dez2025ESTR.xlsx
+│   └── Dez2025EURIBOR.xlsx
 ├── usd_swaption_data.pkl      # Preprocessed USD data
 ├── eur_swaption_data.pkl      # Preprocessed EUR data
 └── requirements.txt
@@ -58,22 +60,43 @@ Total: $n = 79$ parameters for $N = 11$. Positive semi-definiteness of the corre
 Both `dataUSD/` and `dataEUR/` follow the Bloomberg London Close layout:
 
 - `Dez{Year}IV.xlsx` — implied volatility sheets (ATM + OTM). All IVs are **Bachelier (normal) vol in basis points**.
-- `Dez{Year}SOFR.xlsx` (USD) / `Dez{Year}ESTR.xlsx` (EUR) — swap rates for bootstrapping discount factors.
+- `Dez{Year}SOFR.xlsx` (USD) — SOFR swap rates for bootstrapping (single-curve).
+- `Dez{Year}ESTR.xlsx` (EUR) — ESTR OIS rates for bootstrapping discount factors.
+- `Dez{Year}EURIBOR.xlsx` (EUR) — EURIBOR swap rates for bootstrapping forward rates.
 
 ### Swaption grid
 
 **USD:** 19 swaptions per date. Expiries $\{1, 3, 5, 7, 10\}$Y crossed with tenors such that $I + \text{tenor} \leq 11$.
 
-**EUR:** 16 swaptions per date. Expiries $\{1, 2, 3, 5, 7, 10\}$Y with a sparser tenor grid (missing 3Y and 7Y tenor swaptions due to thinner ESTR swaption liquidity).
+**EUR:** 16 swaptions per date. Expiries $\{1, 2, 3, 5, 7, 10\}$Y with a sparser tenor grid (missing ×3Y and ×7Y tenor columns, plus 1Y×7Y, due to thinner ESTR swaption liquidity). Some swaptions have 8 strikes instead of 9 because the −200bp offset produces a non-positive strike at low EUR swap rates (~2%), and these are filtered during preprocessing.
 
-Strikes: ATM $\pm$ 200/100/50/25 bp (9 strikes per smile).
+Strikes: ATM $\pm$ 200/100/50/25 bp (up to 9 strikes per smile).
 
 ### Available dates
 
 | Currency | Dates |
 |----------|-------|
-| USD SOFR | 2024-12-09, 2024-12-10, 2024-12-11, 2025-12-08, 2025-12-09, 2025-12-10 |
-| EUR ESTR | same date range |
+| USD SOFR | 2024-12-09, 2024-12-10, 2025-12-08, 2025-12-09 |
+| EUR ESTR/EURIBOR | 2024-12-09, 2024-12-10, 2025-12-08, 2025-12-09 |
+
+---
+
+## EUR dual-curve preprocessing
+
+EUR swaptions reference 6M EURIBOR as the floating rate but are collateralised and discounted at ESTR, requiring a **dual-curve** setup. The preprocessing handles this as follows:
+
+- **ESTR curve** → discount factors $P^{\text{ESTR}}(T_j)$ → used for annuities $A_0$, the discounting component of the swap rate, and frozen weights $\Pi_0^j$.
+- **EURIBOR curve** → forward term rates $R^j$ → used for the FMM dynamics and normalised weights $\pi_j$.
+
+The dual-curve swap rate is computed explicitly as $S_0 = \sum_j \tau_j P^{\text{ESTR}}(T_j) R_j^{\text{EUR}} / A_0^{\text{ESTR}}$, since the single-curve telescoping identity does not hold when the projection and discounting curves differ. For USD (single-curve), the explicit formula reduces to the standard $(P(T_I) - P(T_J))/A_0$ to machine precision.
+
+### Assumptions and approximations
+
+The EUR implementation retains the annual tenor grid ($\tau_j = 1$, $N = 11$) used for USD, which introduces one approximation:
+
+**Annual EURIBOR forwards instead of semi-annual 6M EURIBOR.** EUR swaptions reference 6M EURIBOR with semi-annual floating payments, but the FMM evolves annual forward rates $R^j$ over $[T_{j-1}, T_j]$ with $\tau_j = 1$. This approximates the semi-annual floating leg by an annual one. The resulting error is the difference between compounding two consecutive 6M forwards and a single annual forward, which is a second-order convexity effect — typically fractions of a basis point on the swap rate, well within the calibration noise. Switching to a semi-annual grid ($\tau_j = 0.5$, $N = 22$) would eliminate this approximation but roughly double the parameter count and correlation matrix dimension.
+
+The EURIBOR-ESTR basis (which ranged from −18bp to +62bp across tenors in December 2024) is handled correctly by the dual-curve bootstrapping and does not enter as an approximation.
 
 ---
 
@@ -104,7 +127,7 @@ python preprocessing.py --currency usd    # generates usd_swaption_data.pkl
 python preprocessing.py --currency eur    # generates eur_swaption_data.pkl
 ```
 
-Bootstraps discount factors, converts Bachelier IVs to Black IVs, and computes frozen weights $\Pi_0^j$ and normalised weights $\pi_j$.
+Bootstraps discount factors, converts Bachelier IVs to Black IVs (filtering strikes where the conversion fails), and computes frozen weights $\Pi_0^j$ and normalised weights $\pi_j$. For EUR, bootstraps ESTR and EURIBOR curves separately and computes the dual-curve swap rate.
 
 ---
 
@@ -118,7 +141,7 @@ Configure via the `CONFIG` dict at the top of `calibration.py`:
 
 ```python
 CONFIG = {
-    "data_file":       "usd_swaption_data.pkl",
+    "data_file":       "eur_swaption_data.pkl",  # or "usd_swaption_data.pkl"
     "in_sample_date":  "2024-12-09",
     "out_sample_date": "2024-12-10",
     "mode":            "hybrid_two_stage",
@@ -195,14 +218,14 @@ The cheapest mode per iteration. Stage 1 uses the left-point Riemann discretisat
 
 | Mode | Description |
 |------|-------------|
-| `cross` | Train/test split cross-validation. Runs hybrid two-stage on 13 training swaptions, evaluates on 6 held-out instruments. |
+| `cross` | Train/test split cross-validation. Runs hybrid two-stage on training swaptions, evaluates on held-out instruments. |
 | `roughness` | Roughness ablation. Re-calibrates at each fixed $H \in \{0.05, 0.10, \ldots, 0.50\}$ using the exact Cholesky scheme (1,200 iterations each). The case $H = 0.50$ uses the Markovian SABR scheme. |
 
 ### Cross-validation
 
 **USD** (6 held-out): 1Y×3Y, 1Y×7Y, 3Y×2Y, 3Y×7Y, 5Y×3Y, 7Y×2Y.
 
-**EUR:** Auto-selected (5 held-out): 1Y×5Y, 2Y×5Y, 3Y×5Y, 5Y×5Y, 7Y×2Y — since only 2 of the USD test keys exist in the EUR grid.
+**EUR:** Auto-selected (~5 held-out): since only 2 of the USD test keys exist in the EUR grid, the code automatically selects one multi-rate swaption per expiry bucket, choosing the middle tenor where available, and only from swaptions with smile data.
 
 ### Variance reduction
 
@@ -217,7 +240,7 @@ All parameters except $\alpha$ are frozen at calibrated values. $\alpha$ is fine
 ## Full analysis
 
 ```bash
-# Preview all 24 runs
+# Preview all runs
 python run_all_calibrations.py --device cpu --dtype float64 --dry-run
 
 # Generate driver scripts, then execute
@@ -274,7 +297,7 @@ tail -f results/usd/phase1_modes/hybrid_two_stage/2024-12-09/log.txt
 
 ## Numerical stability
 
-A `log_S` clamp (`torch.clamp(log_S, min=-20.0, max=20.0)`) is applied in all simulation functions to prevent `exp` overflow on EUR Dec 2024 data, where high $\alpha$ values (~0.39) combined with low rates (~1.7%) produce extreme variance paths. The clamp is a no-op for USD.
+A `log_S` clamp (`torch.clamp(log_S, min=-20.0, max=20.0)`) is applied in all simulation functions to prevent `exp` overflow. Strikes where the Bachelier-to-Black IV conversion fails (typically deep OTM strikes at low EUR swap rates) are filtered during preprocessing to prevent NaN propagation into the loss function.
 
 ---
 
