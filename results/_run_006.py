@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Auto-generated driver: P1 | USD | hybrid_exact         | 2025-12-08 → 2025-12-09"""
+"""Auto-generated driver: P2 | EUR | cross                | 2025-12-08"""
 import sys, os, shutil, json
 
 # Work from the code directory (one level up from results/)
 os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
 patch = {
-  "data_file": "usd_swaption_data.pkl",
+  "data_file": "eur_swaption_data.pkl",
   "in_sample_date": "2025-12-08",
   "out_sample_date": "2025-12-09",
   "device": "cpu",
   "dtype": "float64",
-  "mode": "hybrid_exact"
+  "mode": "cross"
 }
 
 # Write config override file (calibration.py reads this at startup)

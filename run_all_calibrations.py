@@ -50,9 +50,8 @@ CURRENCIES = {
     },
     "eur": {
         "data_file": "eur_swaption_data.pkl",
-        "train_dates": ["2024-12-09", "2025-12-08"],
+        "train_dates": ["2025-12-08"],
         "oos_pairs": [
-            ("2024-12-09", "2024-12-10"),
             ("2025-12-08", "2025-12-09"),
         ],
     },

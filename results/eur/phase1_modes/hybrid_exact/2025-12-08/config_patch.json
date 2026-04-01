@@ -1,0 +1,8 @@
+{
+  "data_file": "eur_swaption_data.pkl",
+  "in_sample_date": "2025-12-08",
+  "out_sample_date": "2025-12-09",
+  "device": "cpu",
+  "dtype": "float64",
+  "mode": "hybrid_exact"
+}
