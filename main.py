@@ -8,12 +8,6 @@ from scipy.stats import norm
 from scipy.special import hyp2f1 as scipy_hyp2f1
 import py_lets_be_rational as _lbr
 
-# ---------------------------------------------------------------------------
-# Global dtype — set to torch.float32 for speed, torch.float64 for precision.
-# All tensors (parameters, market data, simulation) use this consistently.
-# The exact Cholesky covariance build (2M×2M) is always done in float64 for
-# numerical stability and cast down afterwards.
-# ---------------------------------------------------------------------------
 DTYPE = torch.float64
 
 def set_dtype(dt: torch.dtype):
