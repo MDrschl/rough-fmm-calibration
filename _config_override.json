@@ -4,5 +4,5 @@
   "out_sample_date": "2025-12-09",
   "device": "cpu",
   "dtype": "float64",
-  "mode": "hybrid_two_stage"
+  "mode": "roughness"
 }
