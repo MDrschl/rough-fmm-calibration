@@ -80,13 +80,36 @@ Discount factors:
 ############################################################
 # AMCC CALIBRATION (train set only)
 ############################################################
-Traceback (most recent call last):
-  File "/Users/MaximilianDroschl/Desktop/MasterThesis/AMCC_RoughSABR/rough-fmm-calibration/results/_run_006.py", line 23, in <module>
-    exec(compile(open('calibration.py').read(), 'calibration.py', 'exec'))
-  File "calibration.py", line 2070, in <module>
-    result = run_mode_cross(params, mkt, cfg)
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "calibration.py", line 671, in run_mode_cross
-    if k in mkt.swaptions and mkt.swaptions[k]["n_strikes"] > 1]
-                              ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
-TypeError: 'SwaptionData' object is not subscriptable
+  Only 2 configured test keys have smile data.
+  Auto-selecting test keys from available swaptions...
+  Auto-selected test keys: 1Y×5Y, 2Y×5Y, 3Y×5Y, 5Y×5Y, 7Y×2Y
+
+  Train (11 swaptions — used in optimiser):
+    1Y×1Y
+    1Y×2Y
+    1Y×10Y
+    2Y×1Y
+    2Y×2Y
+    3Y×1Y
+    3Y×2Y
+    5Y×1Y
+    5Y×2Y
+    7Y×1Y
+    10Y×1Y
+
+  Test (5 swaptions — held out):
+    1Y×5Y
+    2Y×5Y
+    3Y×5Y
+    5Y×5Y
+    7Y×2Y
+
+============================================================
+STAGE 1 (train): Hybrid (κ=2), H differentiable
+============================================================
+  400 iterations, 20,000 paths, 50 steps, lr=0.005
+  H_lr_factor=1.5, grad_clip_norm=1.0
+  [   0/400]  loss=0.503465  RMSE_IV=8.677%  H=0.1000  η=2.0000  κ=0.8944  lr=1.68e-04
+  [  20/400]  loss=0.453282  RMSE_IV=8.232%  H=0.1028  η=2.0303  κ=0.9206  lr=3.50e-03
+/Users/MaximilianDroschl/.pyenv/versions/3.12.9/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:198: UserWarning: The epoch parameter in `scheduler.step()` was not necessary and is being deprecated where possible. Please use `scheduler.step()` to step the scheduler. During the deprecation, if epoch is different from None, the closed form is used instead of the new chainable form, where available. Please open an issue if you are unable to replicate your use case: https://github.com/pytorch/pytorch/issues/new/choose.
+  warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
