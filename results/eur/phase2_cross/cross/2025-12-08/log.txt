@@ -1,0 +1,92 @@
+  dtype: torch.float64
+Loading market data...
+  Date: 2025-12-08
+============================================================
+Market Data Summary
+============================================================
+N = 11 (annual grid T_0=0,...,T_11)
+Device: cpu
+Swaptions: 16
+(I,J) groups: 16
+
+Discount factors:
+  P(T_0) = 1.000000
+  P(T_1) = 0.980878    R_1 = 2.166%
+  P(T_2) = 0.960379    R_2 = 2.421%
+  P(T_3) = 0.937925    R_3 = 2.643%
+  P(T_4) = 0.914218    R_4 = 2.822%
+  P(T_5) = 0.889873    R_5 = 2.950%
+  P(T_6) = 0.865389    R_6 = 3.051%
+  P(T_7) = 0.840464    R_7 = 3.173%
+  P(T_8) = 0.815279    R_8 = 3.297%
+  P(T_9) = 0.789909    R_9 = 3.373%
+  P(T_10) = 0.764817    R_10 = 3.461%
+  P(T_11) = 0.739523    R_11 = 3.554%
+
+         Key   I   J    S0(%)   ATM IV   #K   sum(pi)
+------------------------------------------------------------
+  1Y x 1Y   1   2    2.421   20.09%    9    1.0028
+  1Y x 2Y   1   3    2.531   21.04%    9    1.0032
+  1Y x 5Y   1   6    2.769   21.10%    9    1.0032
+  1Y x 10Y   1  11    3.046   20.17%    9    0.9993
+  2Y x 1Y   2   3    2.643   22.00%    9    1.0024
+  2Y x 2Y   2   4    2.732   21.83%    9    1.0029
+  2Y x 5Y   2   7    2.921   21.26%    9    1.0035
+  3Y x 1Y   3   4    2.822   22.36%    9    1.0022
+  3Y x 2Y   3   5    2.885   22.28%    9    1.0028
+  3Y x 5Y   3   8    3.052   21.17%    9    1.0036
+  5Y x 1Y   5   6    3.051   22.40%    9    1.0022
+  5Y x 2Y   5   7    3.111   22.10%    9    1.0028
+  5Y x 5Y   5  10    3.265   20.81%    9    1.0032
+  7Y x 1Y   7   8    3.297   21.45%    9    1.0020
+  7Y x 2Y   7   9    3.335   21.29%    9    1.0024
+  10Y x 1Y  10  11    3.554   20.05%    9    1.0013
+
+############################################################
+# INITIALISATION
+############################################################
+
+  Pass 1 — 1Y-tenor ATM matching:
+    Matched rate indices (0-based): [1, 2, 3, 5, 7, 10]
+    α at matched: α[1]=0.1315, α[2]=0.1351, α[3]=0.1318, α[5]=0.1247, α[7]=0.1146, α[10]=0.1023
+  Pass 2 — interpolation for unmatched indices: [0, 4, 6, 8, 9]
+    α after interpolation: α[0]=0.1315, α[4]=0.1283, α[6]=0.1197, α[8]=0.1105, α[9]=0.1064
+    α final: [0.1315, 0.1315, 0.1351, 0.1318, 0.1283, 0.1247, 0.1197, 0.1146, 0.1105, 0.1064, 0.1023]
+
+  Initialised parameters:
+    H     = 0.1000
+    η     = 2.0000
+    α     = [0.1315, 0.1315, 0.1351, 0.1318, 0.1283, 0.1247, 0.1197, 0.1146, 0.1105, 0.1064, 0.1023]
+    ρ₀    = [-0.500, -0.500, -0.500, -0.500, -0.500, -0.500, -0.500, -0.500, -0.500, -0.500, -0.500]
+
+  ATM verification (formula: σ_ATM ≈ √v̄, overestimates at high η due to Jensen):
+    1Y× 1Y: √v̄=20.09%  mkt=20.09%  diff=+0.00%  (√v₀=13.18%, G=2.323)  [matched]
+    1Y× 2Y: √v̄=16.13%  mkt=21.04%  diff=-4.92%  (√v₀=10.58%, G=2.323)  [multi-rate]
+    1Y× 5Y: √v̄=12.59%  mkt=21.10%  diff=-8.51%  (√v₀=8.26%, G=2.323)  [multi-rate]
+    1Y×10Y: √v̄=10.45%  mkt=20.17%  diff=-9.72%  (√v₀=6.86%, G=2.323)  [multi-rate]
+    2Y× 1Y: √v̄=22.00%  mkt=22.00%  diff=-0.00%  (√v₀=13.55%, G=2.637)  [matched]
+    2Y× 2Y: √v̄=17.18%  mkt=21.83%  diff=-4.65%  (√v₀=10.58%, G=2.637)  [multi-rate]
+    2Y× 5Y: √v̄=13.17%  mkt=21.26%  diff=-8.09%  (√v₀=8.11%, G=2.637)  [multi-rate]
+    3Y× 1Y: √v̄=22.36%  mkt=22.36%  diff=+0.00%  (√v₀=13.21%, G=2.865)  [matched]
+    3Y× 2Y: √v̄=17.45%  mkt=22.28%  diff=-4.83%  (√v₀=10.31%, G=2.865)  [multi-rate]
+    3Y× 5Y: √v̄=13.30%  mkt=21.17%  diff=-7.87%  (√v₀=7.86%, G=2.865)  [multi-rate]
+    5Y× 1Y: √v̄=22.40%  mkt=22.40%  diff=+0.00%  (√v₀=12.50%, G=3.213)  [matched]
+    5Y× 2Y: √v̄=17.36%  mkt=22.10%  diff=-4.74%  (√v₀=9.69%, G=3.213)  [multi-rate]
+    5Y× 5Y: √v̄=13.11%  mkt=20.81%  diff=-7.70%  (√v₀=7.31%, G=3.213)  [multi-rate]
+    7Y× 1Y: √v̄=21.45%  mkt=21.45%  diff=+0.00%  (√v₀=11.48%, G=3.489)  [matched]
+    7Y× 2Y: √v̄=16.66%  mkt=21.29%  diff=-4.63%  (√v₀=8.92%, G=3.489)  [multi-rate]
+    10Y× 1Y: √v̄=20.05%  mkt=20.05%  diff=+0.00%  (√v₀=10.24%, G=3.833)  [matched]
+
+############################################################
+# AMCC CALIBRATION (train set only)
+############################################################
+Traceback (most recent call last):
+  File "/Users/MaximilianDroschl/Desktop/MasterThesis/AMCC_RoughSABR/rough-fmm-calibration/results/_run_006.py", line 23, in <module>
+    exec(compile(open('calibration.py').read(), 'calibration.py', 'exec'))
+  File "calibration.py", line 2070, in <module>
+    result = run_mode_cross(params, mkt, cfg)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "calibration.py", line 671, in run_mode_cross
+    if k in mkt.swaptions and mkt.swaptions[k]["n_strikes"] > 1]
+                              ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+TypeError: 'SwaptionData' object is not subscriptable
