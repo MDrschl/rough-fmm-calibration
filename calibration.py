@@ -46,7 +46,7 @@ CONFIG = {
     #   "hybrid_exact"      — Mode G: hybrid S1 → exact Cholesky S2
     #   "roughness"         — Mode E: ablation study, H free vs H = 0.5
     #   "cross"             — Mode F: train/test split cross-validation
-    "mode": "hybrid_two_stage",
+    "mode": "cross",
 
     "hybrid": {
         "iterations": 800,
@@ -299,7 +299,7 @@ def _auto_select_test_keys(all_keys, swaptions=None):
         # Only multi-rate candidates (tenor > 1) with smile data
         multi = [k for k in keys if k[1] > 1]
         if swaptions is not None:
-            multi = [k for k in multi if swaptions[k]["n_strikes"] > 1]
+            multi = [k for k in multi if swaptions[k].n_strikes > 1]
         if not multi:
             continue
         # Pick the middle tenor
@@ -668,7 +668,7 @@ def run_mode_cross(params, mkt, cfg):
 
     all_keys = sorted(mkt.swaptions.keys())
     test_keys = [k for k in ccfg["test_keys"]
-                 if k in mkt.swaptions and mkt.swaptions[k]["n_strikes"] > 1]
+                if k in mkt.swaptions and mkt.swaptions[k].n_strikes > 1]
 
     if len(test_keys) < 3:
         print(f"  Only {len(test_keys)} configured test keys have smile data.")
